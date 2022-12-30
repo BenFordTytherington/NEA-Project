@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "NEA-Project"
+name = "nea_project"
 version = "0.1.0"
