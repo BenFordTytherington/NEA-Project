@@ -1,0 +1,46 @@
+on: [push, pull_request]
+
+name: Nightly Linting
+
+jobs:
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout src
+        uses: actions/checkout@v3
+
+      - name: Install nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+          components: clippy
+
+      - name: run cargo clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings
+
+    rustfmt:
+      name: Format
+      runs-no: ubuntu-latest
+      steps:
+        - name: Checkout src
+          uses: actions/checkout@v3
+
+        - name: Install nightly toolchain
+          uses: actions-rs/toolchain@v1
+          with:
+            profile: minimal
+            toolchain: nightly
+            override: true
+            components: rustfmt
+
+        - name: run cargo fmt
+          uses: actions-rs/cargo@v1
+          with:
+            command: fmt
+            args: --all -- --check
