@@ -139,4 +139,55 @@ impl Vst3Plugin for GranularPlugin {
 nih_export_vst3!(GranularPlugin);
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use nih_plug::log::debug;
+    use nih_plug::nih_debug_assert_eq;
+    use nih_plug::prelude::NoteEvent;
+    use super::*;
+
+    /// Reverb
+    /// Delay
+    /// Mod FX
+    /// Granular
+    /// Engine and Audio basics
+    /// *   MIDI Testing
+    ///     MIDI CC
+    #[test]
+    fn midi_cc_received_correct() {
+        let event: NoteEvent = NoteEvent::MidiCC {
+            timing: 2,
+            channel: 1,
+            cc: 45,
+            value: 1.0
+        };
+
+        let intended_cc: u8 = 45;
+        let intended_value: f32 = 1.0;
+        nih_debug_assert_eq!(event:MidiCC.cc, intended_cc);
+        nih_debug_assert_eq!(event:MidiCC.value, intended_value);
+    }
+    ///     MIDI Note
+    #[test]
+        fn midi_note_received_correct(event: NoteEvent, intended_note: u16) {
+            let event: NoteEvent = NoteEvent::NoteOn {
+                timing: 2,
+                voice_id: None,
+                channel: 1,
+                note: 100,
+                velocity: 127.0
+            };
+
+            let intended_note: u8 = 100;
+            nih_debug_assert_eq!(event::NoteOn.note, intended_note);
+        }
+    ///     MIDI filter
+    ///
+    /// * Audio testing
+    ///     Wav file loaded
+    #[test]
+    fn wav_file_loads_correctly() {
+        let reader = hound::WavReader::open("WaveFileLocation.wav").unwrap();
+        debug!(reader.samples::<i16>())
+    }
+    /// GUI
+}
