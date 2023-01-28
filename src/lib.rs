@@ -58,6 +58,7 @@ impl Plugin for GranularPlugin {
     const VENDOR: &'static str = "Ben Ford";
     const URL: &'static str = env!("CARGO_PKG_HOMEPAGE");
     const EMAIL: &'static str = "17bford@tythy.school";
+    const DESCRIPTION: &'static str = "A granular plugin";
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
