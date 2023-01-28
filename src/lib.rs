@@ -58,7 +58,6 @@ impl Plugin for GranularPlugin {
     const VENDOR: &'static str = "Ben Ford";
     const URL: &'static str = env!("CARGO_PKG_HOMEPAGE");
     const EMAIL: &'static str = "17bford@tythy.school";
-    const DESCRIPTION: &'static str = "A granular plugin";
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -135,7 +134,7 @@ impl ClapPlugin for GranularPlugin {
 }
 
 impl Vst3Plugin for GranularPlugin {
-    const VST3_CLASS_ID: [u8; 8] = *b"Granular";
+    const VST3_CLASS_ID: [u8; 16] = *b"GranularPluginV1";
 
     // And don't forget to change these categories, see the docstring on `VST3_CATEGORIES` for more
     // information
