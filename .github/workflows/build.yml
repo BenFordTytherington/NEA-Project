@@ -1,0 +1,35 @@
+name: Automated Build
+
+on:
+  push:
+    branches:
+      - '**'
+
+defaults:
+  run:
+    shell: bash
+
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        include:
+          - {name: ubuntu, os: ubuntu-latest}
+          - {name: windows, os: windows-latest}
+
+    name: Package Binaries
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install dependencies
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt update
+          sudo apt install -y libasound2-dev libgl-dev libjack-dev libxcb1-dev libxcb-icccm4-dev libxcursor-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Setup Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build targets
+        run: cargo xtask bundle granular_plugin -- --release

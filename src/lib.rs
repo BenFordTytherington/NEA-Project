@@ -134,7 +134,7 @@ impl ClapPlugin for GranularPlugin {
 }
 
 impl Vst3Plugin for GranularPlugin {
-    const VST3_CLASS_ID: [u8; 8] = *b"Granular";
+    const VST3_CLASS_ID: [u8; 16] = *b"GranularPluginBF";
 
     // And don't forget to change these categories, see the docstring on `VST3_CATEGORIES` for more
     // information
@@ -142,11 +142,11 @@ impl Vst3Plugin for GranularPlugin {
 }
 
 nih_export_vst3!(GranularPlugin);
+nih_export_clap!(GranularPlugin);
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use nih_plug::log::debug;
+    use hound;
     use nih_plug::nih_debug_assert_eq;
     use nih_plug::prelude::NoteEvent;
 
@@ -157,33 +157,51 @@ mod tests {
     // Engine and Audio basics
     // *   MIDI Testing
     //     MIDI CC
-    #[test]
-    fn midi_cc_received_correct() {
-        let event: NoteEvent = NoteEvent::MidiCC {
-            timing: 2,
-            channel: 1,
-            cc: 45,
-            value: 1.0,
-        };
+    const TIMING: u32 = 5;
 
-        let intended_cc: u8 = 45;
-        let intended_value: f32 = 1.0;
-        nih_debug_assert_eq!(event:MidiCC.cc, intended_cc);
-        nih_debug_assert_eq!(event:MidiCC.value, intended_value);
+    #[test]
+    fn midi_cc_conversion_correct() {
+        let event: NoteEvent = NoteEvent::MidiCC {
+            timing: TIMING,
+            channel: 1,
+            cc: 2,
+            value: 0.5,
+        };
+        nih_debug_assert_eq!(
+            NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
+            event
+        )
     }
     //     MIDI Note
+
     #[test]
-    fn midi_note_received_correct(event: NoteEvent, intended_note: u16) {
+    fn midi_note_on_conversion_correct() {
         let event: NoteEvent = NoteEvent::NoteOn {
-            timing: 2,
+            timing: TIMING,
             voice_id: None,
             channel: 1,
             note: 100,
             velocity: 127.0,
         };
+        nih_debug_assert_eq!(
+            NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
+            event
+        )
+    }
 
-        let intended_note: u8 = 100;
-        nih_debug_assert_eq!(event::NoteOn.note, intended_note);
+    #[test]
+    fn midi_note_off_conversion_correct() {
+        let event: NoteEvent = NoteEvent::NoteOff {
+            timing: TIMING,
+            voice_id: None,
+            channel: 1,
+            note: 100,
+            velocity: 127.0,
+        };
+        nih_debug_assert_eq!(
+            NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
+            event
+        )
     }
     //    MIDI filter
     //
@@ -191,8 +209,12 @@ mod tests {
     //     Wav file loaded
     #[test]
     fn wav_file_loads_correctly() {
-        let reader = hound::WavReader::open("WaveFileLocation.wav").unwrap();
-        debug!(reader.samples::<i16>())
+        let mut reader = hound::WavReader::open("Testing/amen_br.wav").unwrap();
+        let mut samples: Vec<i16> = vec![];
+        for sample in reader.samples::<i16>() {
+            let s: i16 = sample.unwrap();
+            samples.push(s);
+        }
     }
     // GUI
 }
