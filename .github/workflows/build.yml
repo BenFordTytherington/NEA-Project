@@ -30,3 +30,9 @@ jobs:
 
       - name: Build targets
         run: cargo xtask bundle granular_plugin --release
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-${{ matrix.name }}
+          path: target/bundled/
