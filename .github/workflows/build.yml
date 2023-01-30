@@ -29,4 +29,4 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
 
       - name: Build targets
-        run: cargo xtask bundle granular_plugin -- --release
+        run: cargo xtask bundle granular_plugin --release
