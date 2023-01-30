@@ -1,9 +1,6 @@
 name: Automated Build
 
-on:
-  push:
-    branches:
-      - '**'
+on: [push]
 
 defaults:
   run:
