@@ -1,3 +1,4 @@
+use hound;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
@@ -141,12 +142,31 @@ impl Vst3Plugin for GranularPlugin {
     const VST3_CATEGORIES: &'static str = "Fx|Dynamics";
 }
 
+pub fn stat() -> i16 {
+    return 200;
+}
+
+pub fn load_wav(path: &str) -> Result<Vec<i16>, &str> {
+    let mut reader = hound::WavReader::open(path)
+        .expect("Test audio should be in tests directory and have the path specified");
+    let mut samples: Vec<i16> = vec![];
+
+    for sample in reader.samples::<i16>() {
+        match sample {
+            Ok(s) => samples.push(s),
+            Err(_) => return Err("Error occurred during file load"),
+        };
+    }
+
+    Ok(samples)
+}
+
 nih_export_vst3!(GranularPlugin);
 nih_export_clap!(GranularPlugin);
 
 #[cfg(test)]
 mod tests {
-    use hound;
+    use crate::load_wav;
     use nih_plug::nih_debug_assert_eq;
     use nih_plug::prelude::NoteEvent;
 
@@ -155,7 +175,7 @@ mod tests {
     // Mod FX
     // Granular
     // Engine and Audio basics
-    // *   MIDI Testing
+    // *   MIDI tests
     //     MIDI CC
     const TIMING: u32 = 5;
 
@@ -209,12 +229,13 @@ mod tests {
     //     Wav file loaded
     #[test]
     fn wav_file_loads_correctly() {
-        let mut reader = hound::WavReader::open("Testing/amen_br.wav").unwrap();
-        let mut samples: Vec<i16> = vec![];
-        for sample in reader.samples::<i16>() {
-            let s: i16 = sample.unwrap();
-            samples.push(s);
-        }
+        load_wav("tests/amen_br.wav").expect("wav file loaded incorrectly");
+    }
+
+    #[test]
+    #[should_panic]
+    fn wav_file_loads_incorrectly() {
+        load_wav("doesnt/exist.wav").expect("wav file loaded incorrectly");
     }
     // GUI
 }

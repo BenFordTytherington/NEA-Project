@@ -11,7 +11,7 @@ description = "A granular synthesis plugin with reverb, delay and modulation fx"
 members = ["xtask"]
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 hound = "3.5.0"
@@ -21,6 +21,15 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["a
 # Uncomment the below line to disable the on-by-default VST3 feature to remove
 # the GPL compatibility requirement
 # nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default_features = false, features = ["assert_process_allocs"] }
+
+
+[dev-dependencies]
+simple_logger = "4.0.0"
+criterion = "0.4.0"
+
+[[bench]]
+name = "benchmark"
+harness = false
 
 [profile.release]
 lto = "thin"
