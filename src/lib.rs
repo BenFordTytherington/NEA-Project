@@ -1,3 +1,6 @@
+mod delay_buffer;
+mod delay_line;
+
 use hound;
 use nih_plug::prelude::*;
 use std::sync::Arc;
@@ -161,17 +164,55 @@ pub fn load_wav(path: &str) -> Result<Vec<i16>, &str> {
     Ok(samples)
 }
 
+pub fn write_wav(path: &str, samples: Vec<i16>) {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 44100,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+
+    let mut writer = hound::WavWriter::create(path, spec).expect("could not create writer");
+
+    for sample in samples {
+        writer
+            .write_sample(sample)
+            .expect("error occurred while writing sample");
+    }
+    writer.finalize().expect("issue with finalization")
+}
+
 nih_export_vst3!(GranularPlugin);
 nih_export_clap!(GranularPlugin);
 
 #[cfg(test)]
 mod tests {
-    use crate::load_wav;
+    use crate::{delay_line, load_wav, write_wav};
     use nih_plug::nih_debug_assert_eq;
     use nih_plug::prelude::NoteEvent;
+    use test_case::test_case;
 
     // Reverb
     // Delay
+    #[test]
+    fn test_delay() {
+        let mut delay = delay_line::StereoDelay::new(44100.0, 0.21126);
+        let samples_l = load_wav("tests/amen_br.wav").expect("error occurred loading file");
+        let samples_r = samples_l.clone();
+
+        let samples_len = samples_l.len();
+
+        let mut out_l: Vec<i16> = Vec::with_capacity(samples_len);
+        let mut out_r: Vec<i16> = out_l.clone();
+
+        for index in 0..samples_len {
+            let (in_sample_l, in_sample_r) = (samples_l[index] as f64, samples_r[index] as f64);
+            let (sample_l, sample_r) = delay.process(in_sample_l, in_sample_r);
+            out_l.push(sample_l as i16);
+            out_r.push(sample_r as i16);
+        }
+        write_wav("tests/amen_br_delayed_feedback.wav", out_l);
+    }
     // Mod FX
     // Granular
     // Engine and Audio basics
@@ -194,14 +235,15 @@ mod tests {
     }
     //     MIDI Note
 
-    #[test]
-    fn midi_note_on_conversion_correct() {
+    #[test_case(0.0 ; "minimum velocity value")]
+    #[test_case(127.0 ; "maximum velocity value")]
+    fn midi_note_on_conversion_correct(velocity: f32) {
         let event: NoteEvent = NoteEvent::NoteOn {
             timing: TIMING,
             voice_id: None,
             channel: 1,
             note: 100,
-            velocity: 127.0,
+            velocity,
         };
         nih_debug_assert_eq!(
             NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
@@ -209,22 +251,21 @@ mod tests {
         )
     }
 
-    #[test]
-    fn midi_note_off_conversion_correct() {
+    #[test_case(0.0 ; "minimum velocity value")]
+    #[test_case(127.0 ; "maximum velocity value")]
+    fn midi_note_off_conversion_correct(velocity: f32) {
         let event: NoteEvent = NoteEvent::NoteOff {
             timing: TIMING,
             voice_id: None,
             channel: 1,
             note: 100,
-            velocity: 127.0,
+            velocity,
         };
         nih_debug_assert_eq!(
             NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
             event
         )
     }
-    //    MIDI filter
-    //
     // * Audio testing
     //     Wav file loaded
     #[test]
@@ -237,5 +278,6 @@ mod tests {
     fn wav_file_loads_incorrectly() {
         load_wav("doesnt/exist.wav").expect("wav file loaded incorrectly");
     }
+
     // GUI
 }
