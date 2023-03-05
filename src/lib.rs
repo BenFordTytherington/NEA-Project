@@ -1,5 +1,10 @@
+extern crate core;
+
 mod delay_buffer;
 mod delay_line;
+mod samples;
+
+use samples::PhonicMode;
 
 use hound;
 use nih_plug::prelude::*;
@@ -154,6 +159,7 @@ pub fn load_wav(path: &str) -> Result<Vec<i16>, &str> {
         .expect("Test audio should be in tests directory and have the path specified");
     let mut samples: Vec<i16> = vec![];
 
+    // turbofish used to get samples as i16 type
     for sample in reader.samples::<i16>() {
         match sample {
             Ok(s) => samples.push(s),
@@ -164,9 +170,18 @@ pub fn load_wav(path: &str) -> Result<Vec<i16>, &str> {
     Ok(samples)
 }
 
-pub fn write_wav(path: &str, samples: Vec<i16>) {
+pub fn write_wav(path: &str, samples: Vec<i16>, mode: PhonicMode) {
+    let channels: u16 = match mode {
+        PhonicMode::Mono => 1,
+        PhonicMode::Stereo => 2,
+    };
+
+    // although the current system exclusively uses stereo channels and will create stereo from mono input by doubling,
+    // mono writing could be useful for testing in the future.
+
+    // all wav writing in the project will currently by done with i16 for convenience
     let spec = hound::WavSpec {
-        channels: 1,
+        channels,
         sample_rate: 44100,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
@@ -187,35 +202,48 @@ nih_export_clap!(GranularPlugin);
 
 #[cfg(test)]
 mod tests {
-    use crate::{delay_line, load_wav, write_wav};
+    use crate::samples::{PhonicMode, Samples};
+    use crate::{delay_line, load_wav, samples, write_wav};
     use nih_plug::nih_debug_assert_eq;
     use nih_plug::prelude::NoteEvent;
     use test_case::test_case;
 
-    // Reverb
-    // Delay
+    // Reverb Algorithm
+    // Delay Algorithm
     #[test]
     fn test_delay() {
-        let mut delay = delay_line::StereoDelay::new(44100.0, 0.21126);
-        let samples_l = load_wav("tests/amen_br.wav").expect("error occurred loading file");
-        let samples_r = samples_l.clone();
+        /// Test which renders the effects of the delay algorithm to a file based on an input file
+        // the delay times are chosen based on time divisions at the tempo of the audio being processed
+        let mut delay = delay_line::StereoDelay::new(44100.0, 0.21127, 0.10563);
 
-        let samples_len = samples_l.len();
+        // creating a sample struct with the test audio (amen break)
+        let in_samples = samples::IntSamples::new(
+            load_wav("tests/amen_br.wav").expect("error occurred loading file"),
+        );
 
-        let mut out_l: Vec<i16> = Vec::with_capacity(samples_len);
-        let mut out_r: Vec<i16> = out_l.clone();
+        // initializing output vectors in stereo
+        let mut out_l: Vec<i16> = Vec::new();
+        let mut out_r: Vec<i16> = Vec::new();
 
-        for index in 0..samples_len {
-            let (in_sample_l, in_sample_r) = (samples_l[index] as f64, samples_r[index] as f64);
-            let (sample_l, sample_r) = delay.process(in_sample_l, in_sample_r);
-            out_l.push(sample_l as i16);
-            out_r.push(sample_r as i16);
+        // process frames of stereo audio and write them to the output for left and right
+        for (left, right) in in_samples.get_frames() {
+            let (l, r) = delay.process(left as f64, right as f64);
+            out_l.push(l as i16);
+            out_r.push(r as i16);
         }
-        write_wav("tests/amen_br_delayed_feedback.wav", out_l);
+
+        // initialize new sample vector from stereo inputs. from stereo interleaves the samples into a single vector
+        let out_samples = samples::IntSamples::from_stereo(out_l, out_r);
+        write_wav(
+            "tests/amen_br_stereo.wav",
+            out_samples.samples(),
+            PhonicMode::Stereo,
+        );
     }
-    // Mod FX
-    // Granular
-    // Engine and Audio basics
+
+    // Modulation Algorithm
+    // Granular Engine
+    // Audio / MIDI basics
     // *   MIDI tests
     //     MIDI CC
     const TIMING: u32 = 5;
@@ -267,7 +295,7 @@ mod tests {
         )
     }
     // * Audio testing
-    //     Wav file loaded
+    //     Wav file loading
     #[test]
     fn wav_file_loads_correctly() {
         load_wav("tests/amen_br.wav").expect("wav file loaded incorrectly");

@@ -17,6 +17,8 @@ impl DelayBuffer {
 
     pub fn write(&mut self, value: f64) {
         self.buffer[self.index] = value;
+
+        // modulo used to wrap index to start of buffer once at the end
         self.index = (self.index + 1) % self.capacity();
     }
 
