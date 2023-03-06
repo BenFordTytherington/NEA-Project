@@ -337,7 +337,6 @@ dependencies = [
  "criterion",
  "hound",
  "nih_plug",
- "num-traits",
  "simple_logger",
  "test-case",
 ]

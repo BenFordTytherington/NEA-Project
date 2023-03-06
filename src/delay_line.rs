@@ -5,7 +5,7 @@ use crate::delay_buffer::DelayBuffer;
 /// * `buffer`: a delay buffer object storing samples
 /// * `delay_samples`: number of samples to delay input by
 /// * `internal_feedback`: internal feedback multiplier **do not exceed 1 - may create infinite feedback**
-/// 8 `mix_ratio`: ratio of dry to wet (ratio of 1 is 100% wet) **do not exceed 1**
+/// * `mix_ratio`: ratio of dry to wet (ratio of 1 is 100% wet) **do not exceed 1**
 pub struct DelayLine {
     buffer: DelayBuffer,
     delay_samples: usize,

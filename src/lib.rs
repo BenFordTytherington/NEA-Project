@@ -5,13 +5,18 @@ mod delay_line;
 mod samples;
 
 use samples::PhonicMode;
+use std::num::NonZeroU32;
 
+use crate::delay_line::{DelayLine, StereoDelay};
 use hound;
+use nih_plug::buffer::SamplesIter;
+use nih_plug::plugin;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
 struct GranularPlugin {
     params: Arc<GranularPluginParams>,
+    delay: StereoDelay,
 }
 
 #[derive(Params)]
@@ -28,6 +33,7 @@ impl Default for GranularPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(GranularPluginParams::default()),
+            delay: StereoDelay::new(44100.0, 0.2, 0.3),
         }
     }
 }
@@ -70,8 +76,13 @@ impl Plugin for GranularPlugin {
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    const DEFAULT_INPUT_CHANNELS: u32 = 2;
-    const DEFAULT_OUTPUT_CHANNELS: u32 = 2;
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(2),
+        main_output_channels: NonZeroU32::new(2),
+
+        aux_input_ports: &[new_nonzero_u32(2)],
+        ..AudioIOLayout::const_default()
+    }];
 
     const DEFAULT_AUX_INPUTS: Option<AuxiliaryIOConfig> = None;
     const DEFAULT_AUX_OUTPUTS: Option<AuxiliaryIOConfig> = None;
@@ -118,11 +129,10 @@ impl Plugin for GranularPlugin {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        for channel_samples in buffer.iter_samples() {
-            // Smoothing is optionally built into the parameters themselves
-            let gain: f32 = self.params.gain.smoothed.next();
+        for channel in buffer.iter_samples() {
+            let gain = self.params.gain.smoothed.next();
 
-            for sample in channel_samples {
+            for sample in channel {
                 *sample *= gain;
             }
         }
@@ -211,8 +221,8 @@ mod tests {
     // Reverb Algorithm
     // Delay Algorithm
     #[test]
+    /// Test which renders the effects of the delay algorithm to a file based on an input file
     fn test_delay() {
-        /// Test which renders the effects of the delay algorithm to a file based on an input file
         // the delay times are chosen based on time divisions at the tempo of the audio being processed
         let mut delay = delay_line::StereoDelay::new(44100.0, 0.21127, 0.10563);
 
