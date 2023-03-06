@@ -76,14 +76,6 @@ impl Plugin for GranularPlugin {
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
-        main_input_channels: NonZeroU32::new(2),
-        main_output_channels: NonZeroU32::new(2),
-
-        aux_input_ports: &[new_nonzero_u32(2)],
-        ..AudioIOLayout::const_default()
-    }];
-
     const DEFAULT_AUX_INPUTS: Option<AuxiliaryIOConfig> = None;
     const DEFAULT_AUX_OUTPUTS: Option<AuxiliaryIOConfig> = None;
 
