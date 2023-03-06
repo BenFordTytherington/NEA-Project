@@ -9,8 +9,6 @@ use std::num::NonZeroU32;
 
 use crate::delay_line::{DelayLine, StereoDelay};
 use hound;
-use nih_plug::buffer::SamplesIter;
-use nih_plug::plugin;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
@@ -76,8 +74,16 @@ impl Plugin for GranularPlugin {
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    const DEFAULT_AUX_INPUTS: Option<AuxiliaryIOConfig> = None;
-    const DEFAULT_AUX_OUTPUTS: Option<AuxiliaryIOConfig> = None;
+    type SysExMessage = ();
+
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(2),
+        main_output_channels: NonZeroU32::new(2),
+
+        aux_input_ports: &[new_nonzero_u32(2)],
+
+        ..AudioIOLayout::const_default()
+    }];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
