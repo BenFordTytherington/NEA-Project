@@ -1,5 +1,5 @@
 pub struct DelayBuffer {
-    buffer: Vec<f64>,
+    buffer: Vec<f32>,
     index: usize,
 }
 
@@ -15,14 +15,14 @@ impl DelayBuffer {
         self.buffer.capacity()
     }
 
-    pub fn write(&mut self, value: f64) {
+    pub fn write(&mut self, value: f32) {
         self.buffer[self.index] = value;
 
         // modulo used to wrap index to start of buffer once at the end
         self.index = (self.index + 1) % self.capacity();
     }
 
-    pub fn read(&self, delay: usize) -> f64 {
+    pub fn read(&self, delay: usize) -> f32 {
         let offset = if delay < self.index {
             // -1 gives the last sample written to the buffer and then we get the sample from 'delay' number of samples previously
             self.index - 1 - delay

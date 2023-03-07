@@ -9,8 +9,8 @@ use crate::delay_buffer::DelayBuffer;
 pub struct DelayLine {
     buffer: DelayBuffer,
     delay_samples: usize,
-    internal_feedback: f64,
-    mix_ratio: f64,
+    internal_feedback: f32,
+    mix_ratio: f32,
 }
 
 impl DelayLine {
@@ -18,8 +18,8 @@ impl DelayLine {
     pub fn new(
         max_delay_samples: usize,
         delay_samples: usize,
-        internal_feedback: f64,
-        mix_ratio: f64,
+        internal_feedback: f32,
+        mix_ratio: f32,
     ) -> Self {
         Self {
             buffer: DelayBuffer::new(max_delay_samples),
@@ -29,9 +29,9 @@ impl DelayLine {
         }
     }
 
-    pub fn process_with_feedback(&mut self, xn: f64) -> (f64, f64) {
-        let delay_signal: f64 = self.buffer.read(self.delay_samples);
-        let feedback_signal: f64 = delay_signal * self.internal_feedback;
+    pub fn process_with_feedback(&mut self, xn: f32) -> (f32, f32) {
+        let delay_signal: f32 = self.buffer.read(self.delay_samples);
+        let feedback_signal: f32 = delay_signal * self.internal_feedback;
 
         self.buffer.write(xn + feedback_signal);
 
@@ -47,11 +47,11 @@ impl DelayLine {
         self.delay_samples = delay_samples;
     }
 
-    pub fn set_internal_feedback(&mut self, internal_feedback: f64) {
+    pub fn set_internal_feedback(&mut self, internal_feedback: f32) {
         self.internal_feedback = internal_feedback;
     }
 
-    pub fn set_mix_ratio(&mut self, mix_ratio: f64) {
+    pub fn set_mix_ratio(&mut self, mix_ratio: f32) {
         self.mix_ratio = mix_ratio;
     }
 }
@@ -76,7 +76,7 @@ impl StereoDelay {
     }
 
     /// Returns a tuple of samples (left, right) which have been processed through the delay line
-    pub fn process(&mut self, in_sample_l: f64, in_sample_r: f64) -> (f64, f64) {
+    pub fn process(&mut self, in_sample_l: f32, in_sample_r: f32) -> (f32, f32) {
         let (out_left, _) = self.left_dl.process_with_feedback(in_sample_l);
 
         let (out_right, _) = self.right_dl.process_with_feedback(in_sample_r);

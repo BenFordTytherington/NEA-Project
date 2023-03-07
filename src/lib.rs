@@ -7,7 +7,7 @@ mod samples;
 use samples::PhonicMode;
 use std::num::NonZeroU32;
 
-use crate::delay_line::{DelayLine, StereoDelay};
+use crate::delay_line::StereoDelay;
 use hound;
 use nih_plug::prelude::*;
 use std::sync::Arc;
@@ -74,8 +74,6 @@ impl Plugin for GranularPlugin {
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    type SysExMessage = ();
-
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
         main_input_channels: NonZeroU32::new(2),
         main_output_channels: NonZeroU32::new(2),
@@ -86,9 +84,11 @@ impl Plugin for GranularPlugin {
     }];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
-    const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
+    const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
+
+    type SysExMessage = ();
 
     // More advanced plugins can use this to run expensive background tasks. See the field's
     // documentation for more information. `()` means that the plugin does not have any background
@@ -99,14 +99,9 @@ impl Plugin for GranularPlugin {
         self.params.clone()
     }
 
-    fn accepts_bus_config(&self, config: &BusConfig) -> bool {
-        // This works with any symmetrical IO layout
-        config.num_input_channels == config.num_output_channels && config.num_input_channels > 0
-    }
-
     fn initialize(
         &mut self,
-        _bus_config: &BusConfig,
+        _audio_io_layout: &AudioIOLayout,
         _buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
@@ -127,14 +122,14 @@ impl Plugin for GranularPlugin {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        for channel in buffer.iter_samples() {
-            let gain = self.params.gain.smoothed.next();
+        for mut channel_samples in buffer.iter_samples() {
+            let left = *channel_samples.get_mut(0).unwrap();
+            let right = *channel_samples.get_mut(1).unwrap();
 
-            for sample in channel {
-                *sample *= gain;
-            }
+            let (processed_l, processed_r) = self.delay.process(left, right);
+            *channel_samples.get_mut(0).unwrap() = processed_l;
+            *channel_samples.get_mut(1).unwrap() = processed_r;
         }
-
         ProcessStatus::Normal
     }
 }
@@ -153,9 +148,7 @@ impl ClapPlugin for GranularPlugin {
 impl Vst3Plugin for GranularPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"GranularPluginBF";
 
-    // And don't forget to change these categories, see the docstring on `VST3_CATEGORIES` for more
-    // information
-    const VST3_CATEGORIES: &'static str = "Fx|Dynamics";
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Delay];
 }
 
 pub fn stat() -> i16 {
@@ -212,9 +205,6 @@ nih_export_clap!(GranularPlugin);
 mod tests {
     use crate::samples::{PhonicMode, Samples};
     use crate::{delay_line, load_wav, samples, write_wav};
-    use nih_plug::nih_debug_assert_eq;
-    use nih_plug::prelude::NoteEvent;
-    use test_case::test_case;
 
     // Reverb Algorithm
     // Delay Algorithm
@@ -235,7 +225,7 @@ mod tests {
 
         // process frames of stereo audio and write them to the output for left and right
         for (left, right) in in_samples.get_frames() {
-            let (l, r) = delay.process(left as f64, right as f64);
+            let (l, r) = delay.process(left as f32, right as f32);
             out_l.push(l as i16);
             out_r.push(r as i16);
         }
@@ -254,54 +244,6 @@ mod tests {
     // Audio / MIDI basics
     // *   MIDI tests
     //     MIDI CC
-    const TIMING: u32 = 5;
-
-    #[test]
-    fn midi_cc_conversion_correct() {
-        let event: NoteEvent = NoteEvent::MidiCC {
-            timing: TIMING,
-            channel: 1,
-            cc: 2,
-            value: 0.5,
-        };
-        nih_debug_assert_eq!(
-            NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
-            event
-        )
-    }
-    //     MIDI Note
-
-    #[test_case(0.0 ; "minimum velocity value")]
-    #[test_case(127.0 ; "maximum velocity value")]
-    fn midi_note_on_conversion_correct(velocity: f32) {
-        let event: NoteEvent = NoteEvent::NoteOn {
-            timing: TIMING,
-            voice_id: None,
-            channel: 1,
-            note: 100,
-            velocity,
-        };
-        nih_debug_assert_eq!(
-            NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
-            event
-        )
-    }
-
-    #[test_case(0.0 ; "minimum velocity value")]
-    #[test_case(127.0 ; "maximum velocity value")]
-    fn midi_note_off_conversion_correct(velocity: f32) {
-        let event: NoteEvent = NoteEvent::NoteOff {
-            timing: TIMING,
-            voice_id: None,
-            channel: 1,
-            note: 100,
-            velocity,
-        };
-        nih_debug_assert_eq!(
-            NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
-            event
-        )
-    }
     // * Audio testing
     //     Wav file loading
     #[test]

@@ -50,17 +50,17 @@ impl IntSamples {
 /// A struct storing a vector of float samples with associated methods and constructors
 #[derive(Default)]
 pub struct FloatSamples {
-    samples: Vec<f64>,
+    samples: Vec<f32>,
 }
 
 impl FloatSamples {
     /// Constructs a FloatSamples instance from interleaved samples
-    pub fn new(samples: Vec<f64>) -> Self {
+    pub fn new(samples: Vec<f32>) -> Self {
         Self { samples }
     }
 
     /// Gets a copy of the samples for processing
-    pub fn samples(&self) -> Vec<f64> {
+    pub fn samples(&self) -> Vec<f32> {
         self.samples.clone()
     }
 }
@@ -97,9 +97,9 @@ impl Samples<i16> for IntSamples {
     }
 }
 
-impl Samples<f64> for FloatSamples {
-    fn get_frames(&self) -> Vec<(f64, f64)> {
-        let mut frames: Vec<(f64, f64)> = Vec::new();
+impl Samples<f32> for FloatSamples {
+    fn get_frames(&self) -> Vec<(f32, f32)> {
+        let mut frames: Vec<(f32, f32)> = Vec::new();
         for f in self.samples.chunks(2) {
             match f {
                 [a, b] => frames.push((*a, *b)),
@@ -110,7 +110,7 @@ impl Samples<f64> for FloatSamples {
     }
 
     /// Constructs a stereo sample object by duplicating the mono input and interleaving
-    fn from_mono(samples: Vec<f64>) -> Self {
+    fn from_mono(samples: Vec<f32>) -> Self {
         let left = samples.clone();
         let right = samples.clone();
         Self {
@@ -119,7 +119,7 @@ impl Samples<f64> for FloatSamples {
     }
 
     /// Constructs a stereo sample object by interleaving samples
-    fn from_stereo(left: Vec<f64>, right: Vec<f64>) -> Self {
+    fn from_stereo(left: Vec<f32>, right: Vec<f32>) -> Self {
         Self {
             samples: interleave(left, right),
         }
