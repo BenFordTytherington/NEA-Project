@@ -11,15 +11,11 @@ impl DelayBuffer {
         }
     }
 
-    pub fn capacity(&self) -> usize {
-        self.buffer.capacity()
-    }
-
     pub fn write(&mut self, value: f32) {
         self.buffer[self.index] = value;
 
         // modulo used to wrap index to start of buffer once at the end
-        self.index = (self.index + 1) % self.capacity();
+        self.index = (self.index + 1) % self.buffer.len();
     }
 
     pub fn read(&self, delay: usize) -> f32 {
@@ -28,7 +24,7 @@ impl DelayBuffer {
             self.index - 1 - delay
         } else {
             // if the delay is bigger than the current index, the previous operation overflows the start of the array.
-            self.capacity() + self.index - 1 - delay
+            self.buffer.len() + self.index - 1 - delay
         };
         self.buffer[offset] // return the sample from the buffer at the offset.
     }

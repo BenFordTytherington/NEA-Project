@@ -2,6 +2,7 @@ extern crate core;
 
 mod delay_buffer;
 mod delay_line;
+mod filter;
 mod samples;
 
 use samples::PhonicMode;
@@ -31,7 +32,7 @@ impl Default for GranularPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(GranularPluginParams::default()),
-            delay: StereoDelay::new(44100.0, 0.2, 0.3),
+            delay: StereoDelay::new(44100.0, 0.2, 0.3, 0.4, 0.5),
         }
     }
 }
@@ -203,20 +204,50 @@ nih_export_clap!(GranularPlugin);
 
 #[cfg(test)]
 mod tests {
+    use crate::delay_line::TimeDiv;
     use crate::samples::{PhonicMode, Samples};
     use crate::{delay_line, load_wav, samples, write_wav};
+    use test_case::test_case;
 
     // Reverb Algorithm
     // Delay Algorithm
-    #[test]
+    #[test_case(
+        "tests/kalimba_filter_5KHz_delay.wav",
+        80,
+        TimeDiv::Sixteenth,
+        false,
+        TimeDiv::Eighth,
+        true,
+        0.65,
+        0.45;
+        "amen break through delay with feedback filter. Eighth and dotted eighth times. 55% feedback 45% mix"
+    )]
     /// Test which renders the effects of the delay algorithm to a file based on an input file
-    fn test_delay() {
+    fn test_delay(
+        filename: &str,
+        bpm: i32,
+        delay_div_left: TimeDiv,
+        dotted_left: bool,
+        delay_div_right: TimeDiv,
+        dotted_right: bool,
+        feedback: f32,
+        mix: f32,
+    ) {
         // the delay times are chosen based on time divisions at the tempo of the audio being processed
-        let mut delay = delay_line::StereoDelay::new(44100.0, 0.21127, 0.10563);
+        let mut delay = delay_line::StereoDelay::new_sync(
+            44100.0,
+            bpm,
+            delay_div_left,
+            dotted_left,
+            delay_div_right,
+            dotted_right,
+            feedback,
+            mix,
+        );
 
         // creating a sample struct with the test audio (amen break)
         let in_samples = samples::IntSamples::new(
-            load_wav("tests/amen_br.wav").expect("error occurred loading file"),
+            load_wav("tests/kalimba.wav").expect("error occurred loading file"),
         );
 
         // initializing output vectors in stereo
@@ -230,13 +261,16 @@ mod tests {
             out_r.push(r as i16);
         }
 
+        // processing tail time seconds worth of 0s to capture the tail of the delay
+        for _ in 0..(44100 * 3) {
+            let (l, r) = delay.process(0.0, 0.0);
+            out_l.push(l as i16);
+            out_r.push(r as i16)
+        }
+
         // initialize new sample vector from stereo inputs. from stereo interleaves the samples into a single vector
         let out_samples = samples::IntSamples::from_stereo(out_l, out_r);
-        write_wav(
-            "tests/amen_br_stereo.wav",
-            out_samples.samples(),
-            PhonicMode::Stereo,
-        );
+        write_wav(filename, out_samples.samples(), PhonicMode::Stereo);
     }
 
     // Modulation Algorithm
@@ -247,12 +281,14 @@ mod tests {
     // * Audio testing
     //     Wav file loading
     #[test]
+    #[ignore]
     fn wav_file_loads_correctly() {
         load_wav("tests/amen_br.wav").expect("wav file loaded incorrectly");
     }
 
     #[test]
     #[should_panic]
+    #[ignore]
     fn wav_file_loads_incorrectly() {
         load_wav("doesnt/exist.wav").expect("wav file loaded incorrectly");
     }

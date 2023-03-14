@@ -1,4 +1,5 @@
 use crate::delay_buffer::DelayBuffer;
+use crate::filter::LowpassFilter;
 
 /// A delay line which can process inputs with internal feedback
 /// #Attributes
@@ -11,6 +12,7 @@ pub struct DelayLine {
     delay_samples: usize,
     internal_feedback: f32,
     mix_ratio: f32,
+    filter: LowpassFilter,
 }
 
 impl DelayLine {
@@ -26,12 +28,13 @@ impl DelayLine {
             delay_samples,
             internal_feedback,
             mix_ratio,
+            filter: LowpassFilter::new(5000.0, 44100.0, max_delay_samples),
         }
     }
 
     pub fn process_with_feedback(&mut self, xn: f32) -> (f32, f32) {
         let delay_signal: f32 = self.buffer.read(self.delay_samples);
-        let feedback_signal: f32 = delay_signal * self.internal_feedback;
+        let feedback_signal: f32 = self.filter.process(delay_signal) * self.internal_feedback;
 
         self.buffer.write(xn + feedback_signal);
 
@@ -56,6 +59,31 @@ impl DelayLine {
     }
 }
 
+pub enum TimeDiv {
+    Whole,
+    Half,
+    Quarter,
+    Eighth,
+    Sixteenth,
+}
+
+fn calculate_s_synced(bpm: i32, division: TimeDiv, dotted: bool) -> f32 {
+    let divisor: f32 = match division {
+        TimeDiv::Whole => 1.0,
+        TimeDiv::Half => 2.0,
+        TimeDiv::Quarter => 4.0,
+        TimeDiv::Eighth => 8.0,
+        TimeDiv::Sixteenth => 16.0,
+    };
+
+    let measure_length_s: f32 = 240.0 / bpm as f32;
+    let mut length = measure_length_s / divisor;
+    if dotted {
+        length *= 1.5
+    }
+    length
+}
+
 pub struct StereoDelay {
     left_dl: DelayLine,
     right_dl: DelayLine,
@@ -63,15 +91,45 @@ pub struct StereoDelay {
 
 impl StereoDelay {
     /// Constructs a new StereoDelay object with 2 delay lines which have separate delay times, specified in ms
-    pub fn new(sample_rate: f64, delay_seconds_l: f64, delay_seconds_r: f64) -> Self {
+    pub fn new(
+        sample_rate: f64,
+        delay_seconds_l: f64,
+        delay_seconds_r: f64,
+        feedback: f32,
+        mix: f32,
+    ) -> Self {
         let max_delay_samples = sample_rate as usize + 1;
 
         // conversion between seconds and samples using provided sample rate
         let delay_samples_l = (sample_rate * delay_seconds_l) as usize;
         let delay_samples_r = (sample_rate * delay_seconds_r) as usize;
 
-        let left_dl = DelayLine::new(max_delay_samples, delay_samples_l, 0.25, 0.25);
-        let right_dl = DelayLine::new(max_delay_samples, delay_samples_r, 0.25, 0.25);
+        let left_dl = DelayLine::new(max_delay_samples, delay_samples_l, feedback, mix);
+        let right_dl = DelayLine::new(max_delay_samples, delay_samples_r, feedback, mix);
+        Self { left_dl, right_dl }
+    }
+
+    pub fn new_sync(
+        sample_rate: f32,
+        bpm: i32,
+        delay_div_left: TimeDiv,
+        dotted_left: bool,
+        delay_div_right: TimeDiv,
+        dotted_right: bool,
+        feedback: f32,
+        mix: f32,
+    ) -> Self {
+        let max_delay_samples = sample_rate as usize + 1;
+
+        let delay_seconds_l = calculate_s_synced(bpm, delay_div_left, dotted_left);
+        let delay_seconds_r = calculate_s_synced(bpm, delay_div_right, dotted_right);
+
+        // conversion between seconds and samples using provided sample rate
+        let delay_samples_l = (sample_rate * delay_seconds_l) as usize;
+        let delay_samples_r = (sample_rate * delay_seconds_r) as usize;
+
+        let left_dl = DelayLine::new(max_delay_samples, delay_samples_l, feedback, mix);
+        let right_dl = DelayLine::new(max_delay_samples, delay_samples_r, feedback, mix);
         Self { left_dl, right_dl }
     }
 
@@ -81,5 +139,30 @@ impl StereoDelay {
 
         let (out_right, _) = self.right_dl.process_with_feedback(in_sample_r);
         (out_left, out_right)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::delay_line::{calculate_s_synced, TimeDiv};
+
+    #[test]
+    fn test_time_calculator() {
+        let correct_times: Vec<f32> = vec![1.714, 0.857, 0.429, 0.214, 0.107];
+        let calc_times: Vec<f32> = [
+            TimeDiv::Whole,
+            TimeDiv::Half,
+            TimeDiv::Quarter,
+            TimeDiv::Eighth,
+            TimeDiv::Sixteenth,
+        ]
+        .into_iter()
+        .map(|time_d| calculate_s_synced(140, time_d, false))
+        .collect();
+
+        for index in 0..5 {
+            let diff = (correct_times[index] - calc_times[index]).abs();
+            assert!(diff <= 0.001)
+        }
     }
 }
