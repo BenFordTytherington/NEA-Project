@@ -1,6 +1,10 @@
-/// Implementing a first order filter with transfer function H(S) = w_0 / s + w_0
-/// x, y and a0 ... are used due to their correspondence with the equations
+#![allow(dead_code)]
+#![warn(missing_docs)]
+//! Implementing a first order filter with transfer function H(S) = w_0 / s + w_0
+/// x, y and a0 ... are used due to their correspondence with difference equations
 
+#[derive(Debug)]
+/// The coefficients of a first order filter where a0 is normalized to 1
 pub struct LPCoefficients {
     a1: f32,
     b0: f32,
@@ -8,6 +12,7 @@ pub struct LPCoefficients {
 }
 
 impl LPCoefficients {
+    /// A function that generates coefficients given cutoff frequency and sample rate
     pub fn new(cutoff_freq: f32, sample_rate: f32) -> Self {
         let dt: f32 = 1.0 / sample_rate;
         let a0 = (cutoff_freq * dt) + 2.0;
@@ -23,6 +28,8 @@ impl LPCoefficients {
     }
 }
 
+#[derive(Debug)]
+/// A struct used to process input signals through a first order lowpass filter
 pub struct LowpassFilter {
     x: Vec<f32>,
     y: Vec<f32>,
@@ -31,6 +38,7 @@ pub struct LowpassFilter {
 }
 
 impl LowpassFilter {
+    /// A constructor for a new lowpass filter given buffer capacity, cutoff frequency and sample rate
     pub fn new(cutoff_freq: f32, sample_rate: f32, capacity: usize) -> Self {
         Self {
             x: vec![0.0; capacity],
@@ -40,10 +48,12 @@ impl LowpassFilter {
         }
     }
 
+    /// Function to move the index through the buffer with wrapping to form a circular buffer
     fn advance(&mut self) {
         self.n = (self.n + 1) % self.x.len();
     }
 
+    /// A function to process a single input (given as f32) through the lowpass filter
     pub fn process(&mut self, xn: f32) -> f32 {
         // increase the index (with wrapping)
         self.advance();
@@ -69,7 +79,6 @@ mod tests {
     use crate::filter::LowpassFilter;
     use crate::samples::PhonicMode;
     use crate::{load_wav, write_wav};
-    use rand::Rng;
 
     #[test]
     fn test_lp() {

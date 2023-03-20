@@ -1,9 +1,15 @@
+#![allow(dead_code)]
+#![warn(missing_docs)]
+
+#[derive(Debug)]
+/// A circular buffer with read and write functionality based on a delay
 pub struct DelayBuffer {
     buffer: Vec<f32>,
     index: usize,
 }
 
 impl DelayBuffer {
+    /// A constructor for a new circular buffer with capacity given by parameter
     pub fn new(capacity: usize) -> Self {
         Self {
             buffer: vec![0.0; capacity],
@@ -11,6 +17,7 @@ impl DelayBuffer {
         }
     }
 
+    /// A function to write data to the current write pointer index (given as f32)
     pub fn write(&mut self, value: f32) {
         self.buffer[self.index] = value;
 
@@ -18,6 +25,7 @@ impl DelayBuffer {
         self.index = (self.index + 1) % self.buffer.len();
     }
 
+    /// A function to read data at a specified delay behind the write pointer (given as usize)
     pub fn read(&self, delay: usize) -> f32 {
         let offset = if delay < self.index {
             // -1 gives the last sample written to the buffer and then we get the sample from 'delay' number of samples previously

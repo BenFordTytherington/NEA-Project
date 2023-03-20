@@ -1,12 +1,17 @@
+#![allow(dead_code)]
+#![warn(missing_docs)]
+
 use crate::delay_buffer::DelayBuffer;
 use crate::filter::LowpassFilter;
 
-/// A delay line which can process inputs with internal feedback
-/// #Attributes
-/// * `buffer`: a delay buffer object storing samples
-/// * `delay_samples`: number of samples to delay input by
-/// * `internal_feedback`: internal feedback multiplier **do not exceed 1 - may create infinite feedback**
-/// * `mix_ratio`: ratio of dry to wet (ratio of 1 is 100% wet) **do not exceed 1**
+/// A delay line which can process inputs with internal feedback and internal filtering as well as dry/wet mix control
+/// # Attributes
+/// * `buffer`: A delay buffer object storing samples
+/// * `delay_samples`: Number of samples to delay input by
+/// * `internal_feedback`: Internal feedback multiplier **do not exceed 1 - may create infinite feedback and clipping**
+/// * `mix_ratio`: Ratio of dry to wet (ratio of 1 is 100% wet) **do not exceed 1**
+/// * `filter`: A lowpass filter applied in the feedback loop
+#[derive(Debug)]
 pub struct DelayLine {
     buffer: DelayBuffer,
     delay_samples: usize,
@@ -17,6 +22,11 @@ pub struct DelayLine {
 
 impl DelayLine {
     /// Constructor for DelayLine
+    /// # Parameters
+    /// * `max_delay_samples`: The maximum number of delay samples to be used in the `DelayBuffer`
+    /// * `delay_samples`: The number of samples to delay the signal by
+    /// * `internal_feedback`: Float between 0 and 1 to multiply feedback signal by
+    /// * `mix_ratio`: Float between 0 and 1 to multiply feedback signal by
     pub fn new(
         max_delay_samples: usize,
         delay_samples: usize,
@@ -32,6 +42,9 @@ impl DelayLine {
         }
     }
 
+    /// A function which processes a single sample and returns a tuple of 2 processed samples
+    /// # Parameters
+    /// * `xn`: The input sample to be processed, named this way because of the nomenclature on block diagrams and difference equations
     pub fn process_with_feedback(&mut self, xn: f32) -> (f32, f32) {
         let delay_signal: f32 = self.buffer.read(self.delay_samples);
         let feedback_signal: f32 = self.filter.process(delay_signal) * self.internal_feedback;
@@ -44,6 +57,14 @@ impl DelayLine {
         // yn is the output notation from block diagrams
         let yn = (wet_lvl * delay_signal) + (dry_lvl * xn);
         (yn, yn)
+    }
+
+    pub fn get_delay_samples(&self) -> usize {
+        self.delay_samples
+    }
+
+    pub fn get_delay_seconds(&self) -> f32 {
+        self.delay_samples as f32 / 44100_f32
     }
 
     pub fn set_delay_samples(&mut self, delay_samples: usize) {
@@ -59,6 +80,12 @@ impl DelayLine {
     }
 }
 
+/// An enum used for time divisions relative to a bar.
+/// Whole is 1 bar
+/// Half is 2 beats
+/// Quarter is 1 beat
+/// Eighth is an Eighth note or half a beat
+/// Sixteenth is a Sixteenth note or a quarter of a beat
 pub enum TimeDiv {
     Whole,
     Half,
@@ -67,6 +94,11 @@ pub enum TimeDiv {
     Sixteenth,
 }
 
+/// A function to calculate the amount of time in seconds that a given unit of music time takes provided the bpm
+/// # Parameters
+/// * `bpm`: The tempo in beats per minute
+/// * `division`: The time division relative to a bar
+/// * `dotted`: Whether or not to dot the note (meaning multiply its length by 1.5)
 fn calculate_s_synced(bpm: i32, division: TimeDiv, dotted: bool) -> f32 {
     let divisor: f32 = match division {
         TimeDiv::Whole => 1.0,
@@ -84,6 +116,7 @@ fn calculate_s_synced(bpm: i32, division: TimeDiv, dotted: bool) -> f32 {
     length
 }
 
+/// A struct capturing full delay functionality with independent left and right delay lines.
 pub struct StereoDelay {
     left_dl: DelayLine,
     right_dl: DelayLine,
@@ -91,6 +124,12 @@ pub struct StereoDelay {
 
 impl StereoDelay {
     /// Constructs a new StereoDelay object with 2 delay lines which have separate delay times, specified in ms
+    /// # Parameters
+    /// * `sample_rate`: The sample rate to use in Hz
+    /// * `delay_seconds_l`: The length of the left delay line in seconds
+    /// * `delay_seconds_r`: The length of the right delay line in seconds
+    /// * `feedback`: The internal feedback multiplier for `DelayLine`
+    /// * `mix`: The internal wet/dry mix level for `DelayLine`
     pub fn new(
         sample_rate: f64,
         delay_seconds_l: f64,
@@ -109,6 +148,15 @@ impl StereoDelay {
         Self { left_dl, right_dl }
     }
 
+    /// Constructs a new StereoDelay object with 2 delay lines which have separate delay times, specified as a time division
+    /// # Parameters
+    /// * `sample_rate`: The sample rate to use in Hz
+    /// * `delay_div_l`: The length of the left delay line as a time division
+    /// * `dotted_left`: Whether or not to dot the note of the time division of the left delay line
+    /// * `delay_div_r`: The length of the right delay line as a time division
+    /// * `dotted_right`: Whether or not to dot the note of the time division of the right delay line
+    /// * `feedback`: The internal feedback multiplier for `DelayLine`
+    /// * `mix`: The internal wet/dry mix level for `DelayLine`
     pub fn new_sync(
         sample_rate: f32,
         bpm: i32,

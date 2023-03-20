@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![warn(missing_docs)]
+
 /// An enum used to store state of either stereophonic or monophonic in audio structs
 #[derive(Default)]
 pub enum PhonicMode {
@@ -19,6 +22,10 @@ pub trait Samples<T> {
 }
 
 /// A generic helper function to interleave 2 vectors of equal length into a single vector
+/// T can be any type but must implement copy. Should only be used in this context with number types
+/// # Parameters
+/// * `left`: a vector of T
+/// * `right`: a vector of T
 fn interleave<T: Copy>(left: Vec<T>, right: Vec<T>) -> Vec<T> {
     assert_eq!(left.len(), right.len());
     let mut output: Vec<T> = Vec::new();
@@ -69,6 +76,7 @@ impl FloatSamples {
 // Samples implements methods to create stereo from mono and to return frames of stereo samples
 
 impl Samples<i16> for IntSamples {
+    /// Returns a vector of paired samples (for stereo use) first sample is the left channel
     fn get_frames(&self) -> Vec<(i16, i16)> {
         let mut frames: Vec<(i16, i16)> = Vec::new();
         for f in self.samples.chunks(2) {
@@ -98,6 +106,7 @@ impl Samples<i16> for IntSamples {
 }
 
 impl Samples<f32> for FloatSamples {
+    /// Returns a vector of paired samples (for stereo use) first sample is the left channel
     fn get_frames(&self) -> Vec<(f32, f32)> {
         let mut frames: Vec<(f32, f32)> = Vec::new();
         for f in self.samples.chunks(2) {

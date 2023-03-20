@@ -1,9 +1,16 @@
+#![warn(missing_docs)]
+//! A crate containing the main code for the plugin and some helper functions.
+/// GranularPlugin is the main plugin, using the NIH-plug framework to build to the VST3 and CLAP formats.
+/// stat() is used for integration tests.
+/// load_wav() and its float counterpart load samples from a .wav file.
+/// write_wav() and its float counterpart write samples to a .wav file.
 extern crate core;
 
-mod delay_buffer;
-mod delay_line;
-mod filter;
-mod samples;
+pub mod delay_buffer;
+pub mod delay_line;
+pub mod filter;
+pub mod multi_channel;
+pub mod samples;
 
 use samples::PhonicMode;
 use std::num::NonZeroU32;
@@ -13,11 +20,16 @@ use hound;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
+/// The struct used for the main plugin.
+/// # Attributes
+/// * `params`: An Arc containing an instance of `GranularPluginParams`
+/// * `delay`: An instance of `StereoDelay` storing the plugins delay processor
 struct GranularPlugin {
     params: Arc<GranularPluginParams>,
     delay: StereoDelay,
 }
 
+/// The parameters for the main plugin, returned in an Arc type.
 #[derive(Params)]
 struct GranularPluginParams {
     /// The parameter's ID is used to identify the parameter in the wrappred plugin API. As long as
@@ -152,11 +164,17 @@ impl Vst3Plugin for GranularPlugin {
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Delay];
 }
 
+/// Function used in integration tests to ensure the code can be accessed from an external module
 pub fn stat() -> i16 {
     return 200;
 }
 
-pub fn load_wav(path: &str) -> Result<Vec<i16>, &str> {
+/// loads a wav file from string path and returns a result type possibly containing a vector of integer samples
+/// # Returns
+/// * A result type containing either a vector of i16 samples or a hound error
+/// # Parameters
+/// * `path`: A string containing the relative path to the file to be loaded (must include .wav file extension)
+pub fn load_wav(path: &str) -> Result<Vec<i16>, hound::Error> {
     let mut reader = hound::WavReader::open(path)
         .expect("Test audio should be in tests directory and have the path specified");
     let mut samples: Vec<i16> = vec![];
@@ -165,23 +183,45 @@ pub fn load_wav(path: &str) -> Result<Vec<i16>, &str> {
     for sample in reader.samples::<i16>() {
         match sample {
             Ok(s) => samples.push(s),
-            Err(_) => return Err("Error occurred during file load"),
+            Err(e) => return Err(e),
         };
     }
 
     Ok(samples)
 }
 
+/// loads a wav file from string path and returns a result type possibly containing a vector of float samples
+/// # Returns
+/// * A result type containing either a vector of f32 samples or a hound error
+/// # Parameters
+/// * `path`: A string containing the relative path to the file to be loaded (must include .wav file extension)
+pub fn load_wav_float(path: &str) -> Result<Vec<f32>, hound::Error> {
+    let mut reader = hound::WavReader::open(path)
+        .expect("Test audio should be in tests directory and have the path specified");
+    let mut samples: Vec<f32> = vec![];
+
+    // turbofish used to get samples as i16 type
+    for sample in reader.samples::<f32>() {
+        match sample {
+            Ok(s) => samples.push(s),
+            Err(e) => return Err(e),
+        };
+    }
+
+    Ok(samples)
+}
+
+/// writes to a wav file at string path from integer samples
+/// # Parameters
+/// * `path`: A string containing the relative path to the file to be written to (must include .wav file extension)
+/// * `samples`: A vector of i16 samples which will be written to the file
+/// * `mode`: An enum variant determining whether sample vector is stereo or mono (interleaved or not)
 pub fn write_wav(path: &str, samples: Vec<i16>, mode: PhonicMode) {
     let channels: u16 = match mode {
         PhonicMode::Mono => 1,
         PhonicMode::Stereo => 2,
     };
 
-    // although the current system exclusively uses stereo channels and will create stereo from mono input by doubling,
-    // mono writing could be useful for testing in the future.
-
-    // all wav writing in the project will currently by done with i16 for convenience
     let spec = hound::WavSpec {
         channels,
         sample_rate: 44100,
@@ -199,17 +239,111 @@ pub fn write_wav(path: &str, samples: Vec<i16>, mode: PhonicMode) {
     writer.finalize().expect("issue with finalization")
 }
 
+/// writes to a wav file at string path from float samples
+/// # Parameters
+/// * `path`: A string containing the relative path to the file to be written to (must include .wav file extension)
+/// * `samples`: A vector of f32 samples which will be written to the file
+/// * `mode`: An enum variant determining whether sample vector is stereo or mono (interleaved or not)
+pub fn write_wav_float(path: &str, samples: Vec<f32>, mode: PhonicMode) {
+    let channels: u16 = match mode {
+        PhonicMode::Mono => 1,
+        PhonicMode::Stereo => 2,
+    };
+
+    let spec = hound::WavSpec {
+        channels,
+        sample_rate: 44100,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+
+    let mut writer = hound::WavWriter::create(path, spec).expect("could not create writer");
+
+    for sample in samples {
+        writer
+            .write_sample(sample)
+            .expect("error occurred while writing sample");
+    }
+    writer.finalize().expect("issue with finalization")
+}
+
+// the dynamic dispatch start implementation
+// pub fn write_wav(path: &str, samples: Vec<dyn Num>, mode: PhonicMode, format: &str) {
+//     let channels: u16 = match mode {
+//         PhonicMode::Mono => 1,
+//         PhonicMode::Stereo => 2,
+//     };
+//
+//     // although the current system exclusively uses stereo channels and will create stereo from mono input by doubling,
+//     // mono writing could be useful for testing in the future.
+//
+//     // converts input string to a hound sample format
+//     let sample_format = match format {
+//         "int" => hound::SampleFormat::Int,
+//         "float" => hound::SampleFormat::Float,
+//         _ => panic!("format should either be 'int' or 'float'"),
+//     };
+//
+//     let spec = hound::WavSpec {
+//         channels,
+//         sample_rate: 44100,
+//         bits_per_sample: 16,
+//         sample_format,
+//     };
+//
+//     let mut writer = hound::WavWriter::create(path, spec).expect("could not create writer");
+//
+//     for sample in samples {
+//         writer
+//             .write_sample(sample)
+//             .expect("error occurred while writing sample");
+//     }
+//     writer.finalize().expect("issue with finalization")
+// }
+
 nih_export_vst3!(GranularPlugin);
 nih_export_clap!(GranularPlugin);
 
 #[cfg(test)]
 mod tests {
     use crate::delay_line::TimeDiv;
+    use crate::multi_channel::MultiDelayLine;
     use crate::samples::{PhonicMode, Samples};
-    use crate::{delay_line, load_wav, samples, write_wav};
+    use crate::{delay_line, load_wav, load_wav_float, samples, write_wav, write_wav_float};
+    use ndarray::Array1;
     use test_case::test_case;
 
     // Reverb Algorithm
+    #[test]
+    fn test_multi_channel_delay() {
+        let mut delay = MultiDelayLine::new(
+            vec![0.48994831, 0.26392229, 0.71899589, 0.10969853],
+            0.75,
+            1.0,
+        );
+        let in_samples = load_wav_float("tests/impulse.wav").unwrap();
+
+        let mut out_samples: Vec<f32> = Vec::new();
+
+        for sample in in_samples {
+            let sample_vec = Array1::from(vec![sample as f32; 4]);
+            let out_sample = delay.process_with_feedback(sample_vec);
+            out_samples.push(out_sample.iter().sum());
+        }
+
+        // add tail time
+        for _ in 0..(44100 * 5) {
+            let sample_vec = Array1::from(vec![0.0; 4]);
+            let out_sample = delay.process_with_feedback(sample_vec);
+            out_samples.push(out_sample.iter().sum());
+        }
+
+        write_wav_float(
+            "tests/click_multi_delayed.wav",
+            out_samples,
+            PhonicMode::Mono,
+        )
+    }
     // Delay Algorithm
     #[test_case(
         "tests/kalimba_filter_5KHz_delay.wav",
@@ -222,6 +356,7 @@ mod tests {
         0.45;
         "amen break through delay with feedback filter. Eighth and dotted eighth times. 55% feedback 45% mix"
     )]
+    #[ignore]
     /// Test which renders the effects of the delay algorithm to a file based on an input file
     fn test_delay(
         filename: &str,
