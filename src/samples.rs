@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 #![warn(missing_docs)]
+//! A module that contains structs for working with stereo and mono samples as floats or integers.
+//! Contains methods to interleave and un-interleave from a file.
+//! Generic functions used to accept floats or integers.
 
 /// An enum used to store state of either stereophonic or monophonic in audio structs
 #[derive(Default)]

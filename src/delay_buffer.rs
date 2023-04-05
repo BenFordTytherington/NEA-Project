@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 #![warn(missing_docs)]
+//! A module containing a circular buffer which can read at a specified delay behind the write pointer.
+//! Reads and writes float samples.
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// A circular buffer with read and write functionality based on a delay
 pub struct DelayBuffer {
     buffer: Vec<f32>,

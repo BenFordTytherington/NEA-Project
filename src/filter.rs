@@ -23,6 +23,7 @@ impl LPCoefficients {
         }
     }
 
+    #[allow(missing_docs)]
     pub fn get_coeffs(&self) -> (f32, f32, f32) {
         (self.a1, self.b0, self.b1)
     }

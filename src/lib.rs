@@ -1,15 +1,18 @@
 #![warn(missing_docs)]
 //! A crate containing the main code for the plugin and some helper functions.
-/// GranularPlugin is the main plugin, using the NIH-plug framework to build to the VST3 and CLAP formats.
-/// stat() is used for integration tests.
-/// load_wav() and its float counterpart load samples from a .wav file.
-/// write_wav() and its float counterpart write samples to a .wav file.
+//! GranularPlugin is the main plugin, using the NIH-plug framework to build to the VST3 and CLAP formats.
+//! stat() is used for integration tests.
+//! load_wav() and its float counterpart load samples from a .wav file.
+//! write_wav() and its float counterpart write samples to a .wav file.
+
 extern crate core;
 
 pub mod delay_buffer;
 pub mod delay_line;
+pub mod diffusion;
 pub mod filter;
 pub mod multi_channel;
+pub mod reverb;
 pub mod samples;
 
 use samples::PhonicMode;
@@ -315,33 +318,31 @@ mod tests {
 
     // Reverb Algorithm
     #[test]
+    #[ignore]
     fn test_multi_channel_delay() {
+        let mut in_samples = load_wav("tests/kalimba.wav").unwrap();
+        in_samples.extend_from_slice(&[0; (44100 * 6)]);
+
         let mut delay = MultiDelayLine::new(
-            vec![0.48994831, 0.26392229, 0.71899589, 0.10969853],
-            0.75,
-            1.0,
+            vec![0.03237569, 0.0557472990, 0.0587274724, 0.08126467282],
+            0.8,
+            0.25,
+            4,
+            44100,
         );
-        let in_samples = load_wav_float("tests/impulse.wav").unwrap();
 
-        let mut out_samples: Vec<f32> = Vec::new();
-
-        for sample in in_samples {
-            let sample_vec = Array1::from(vec![sample as f32; 4]);
-            let out_sample = delay.process_with_feedback(sample_vec);
-            out_samples.push(out_sample.iter().sum());
+        let mut out_samples = Vec::new();
+        for (index, sample) in in_samples.iter_mut().enumerate() {
+            let sample_vec = Array1::from(vec![*sample as f32; 4]);
+            let out_sample = delay.process_with_feedback(sample_vec, true);
+            let summed: f32 = out_sample.iter().sum();
+            out_samples.push(summed as i16 / 4);
         }
 
-        // add tail time
-        for _ in 0..(44100 * 5) {
-            let sample_vec = Array1::from(vec![0.0; 4]);
-            let out_sample = delay.process_with_feedback(sample_vec);
-            out_samples.push(out_sample.iter().sum());
-        }
-
-        write_wav_float(
-            "tests/click_multi_delayed.wav",
+        write_wav(
+            "tests/kalimba_2_series.wav",
             out_samples,
-            PhonicMode::Mono,
+            PhonicMode::Stereo,
         )
     }
     // Delay Algorithm

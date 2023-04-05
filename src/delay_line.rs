@@ -1,5 +1,9 @@
 #![allow(dead_code)]
 #![warn(missing_docs)]
+//! A module containing structs for a delay line and delay processor.
+//! Delay line implements a delay line with dynamic delay times and a first order low-pass in the feedback loop.
+//! Stereo Delay implements a delay processor that has 2 delay independently timed delay lines and processes stereo sample pairs.
+//! Both use f32 samples
 
 use crate::delay_buffer::DelayBuffer;
 use crate::filter::LowpassFilter;
@@ -59,22 +63,27 @@ impl DelayLine {
         (yn, yn)
     }
 
+    #[allow(missing_docs)]
     pub fn get_delay_samples(&self) -> usize {
         self.delay_samples
     }
 
+    #[allow(missing_docs)]
     pub fn get_delay_seconds(&self) -> f32 {
         self.delay_samples as f32 / 44100_f32
     }
 
+    #[allow(missing_docs)]
     pub fn set_delay_samples(&mut self, delay_samples: usize) {
         self.delay_samples = delay_samples;
     }
 
+    #[allow(missing_docs)]
     pub fn set_internal_feedback(&mut self, internal_feedback: f32) {
         self.internal_feedback = internal_feedback;
     }
 
+    #[allow(missing_docs)]
     pub fn set_mix_ratio(&mut self, mix_ratio: f32) {
         self.mix_ratio = mix_ratio;
     }
