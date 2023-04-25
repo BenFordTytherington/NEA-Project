@@ -351,6 +351,7 @@ dependencies = [
  "ndarray",
  "nih_plug",
  "num-traits",
+ "once_cell",
  "rand",
  "simple_logger",
  "test-case",
