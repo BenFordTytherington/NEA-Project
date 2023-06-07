@@ -1,26 +1,35 @@
+//! A module providing a struct for diffusing audio using a polarity shuffle and Hadamard mix technique
+//! Diffuser takes an array input and uses lin-alg to perform Hadamard mixer multiplication.
+//! Shuffles channels and randomly decides whether to flip polarity.
+//! Based on the article "let's write a reverb" by Geraint Luff of signal smith audio
 use crate::multi_channel::{HadamardMixer, MultiDelayLine};
 use ndarray::{Array, Array1, Ix1};
 use rand::{seq::SliceRandom, thread_rng, Rng};
 
+/// A struct that has a mixing object and a multi delay line, performs diffusion of an array of audio samples.
+///
+/// Delays using multi delay line, shuffles and flips polarity and then mixes using the Hadamard mixer
 pub struct Diffuser {
-    num_channels: i8,
     mixer: HadamardMixer,
     delay: MultiDelayLine,
 }
 
 impl Diffuser {
-    pub fn new(num_channels: i8, max_time: f32) -> Self {
+    /// Constructor for the Diffuser struct.
+    ///
+    /// Takes parameters of number of channels (for the hadamard mixer) and max_time, for setting up the delay line
+    pub fn new(num_channels: u8, max_time: f32) -> Self {
         let times: Vec<f32> = (0..num_channels)
             .map(|index| Self::gen_random_time(max_time, num_channels, index))
             .collect();
         Self {
-            num_channels,
             mixer: HadamardMixer::new(num_channels),
             delay: MultiDelayLine::new(times, 0.0, 1.0, num_channels, 44100),
         }
     }
 
-    fn gen_random_time(max_time: f32, num_channels: i8, channel: i8) -> f32 {
+    /// Generate N random times in a range so that each even Nth division of the range has exactly one time in it.
+    fn gen_random_time(max_time: f32, num_channels: u8, channel: u8) -> f32 {
         // width of one cell division (when splitting the time range from 0 to max_time into segments (num channels)
         let cell_size: f32 = max_time / (num_channels as f32);
         let lower_bound: f32 = cell_size * (channel as f32);
@@ -30,6 +39,15 @@ impl Diffuser {
         time
     }
 
+    /// Function which takes a 1D array of samples and randomly reorders the channels as well as probabilistically flips polarity
+    ///
+    ///
+    /// E.G:
+    ///
+    ///     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    ///
+    /// -> `[2, -4 6, 9, -10, 3, 1, 5, -7, 8]`
+    ///
     pub fn shuffle_and_flip(&self, xn: Array1<f32>) -> Array<f32, Ix1> {
         let mut rng = thread_rng();
         let polarities = [-1.0, 1.0];
@@ -47,12 +65,11 @@ impl Diffuser {
             .collect()
     }
 
+    /// Function combining all the steps for diffusion into a single process.
     pub fn diffuse(&mut self, xn: Array1<f32>) -> Array<f32, Ix1> {
         let delayed = self.delay.process_with_feedback(xn, false);
         let shuffled = self.shuffle_and_flip(delayed);
-        let mixed = self.mixer.mix(shuffled);
-
-        mixed
+        self.mixer.mix(shuffled)
     }
 }
 
@@ -60,7 +77,7 @@ impl Diffuser {
 mod tests {
     use super::Diffuser;
     use crate::samples::PhonicMode;
-    use crate::{load_wav, load_wav_float, write_wav, write_wav_float};
+    use crate::{load_wav, write_wav};
     use ndarray::arr1;
 
     #[test]
@@ -69,12 +86,13 @@ mod tests {
         let diffuser = Diffuser::new(4, 0.02);
         let output = diffuser.shuffle_and_flip(input.clone());
         assert_ne!(input, output);
+        assert_ne!(input.sum(), output.sum())
     }
 
     #[test]
     #[ignore]
     fn test_diffusion_series() {
-        let mut diffusers: Vec<Diffuser> = vec![
+        let diffusers: Vec<Diffuser> = vec![
             Diffuser::new(8, 0.048),
             Diffuser::new(8, 0.096),
             Diffuser::new(8, 0.192),

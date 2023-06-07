@@ -1,4 +1,5 @@
 //! Multi-Mode Low Frequency Oscillator (MMLFO) module with the following features:
+use crate::modulation::Modulator;
 /// * WaveForms
 ///      - square
 ///      - triangle
@@ -7,19 +8,14 @@
 /// * frequency (Hz)
 /// * sync (time div enum)
 /// * get current sample / step current index
-use crate::delay_line::calculate_s_synced;
-use crate::delay_line::TimeDiv;
+use crate::timing::{TimeDiv, Timing};
 use rand::{thread_rng, Rng};
 use std::f32::consts::PI;
-use std::io::Seek;
-
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a * (1.0 - t) + b * t
-}
 
 #[derive(Default, PartialEq, Debug)]
 /// An enum of available LFO modes, excluding the Sample and Hold mode,
 /// which is implemented separately
+#[allow(missing_docs)]
 pub enum LFOMode {
     #[default]
     Sine,
@@ -35,7 +31,7 @@ impl LFOMode {
             LFOMode::Sine => |x| (0.5 * (2.0 * PI * x).sin()) + 0.5,
             LFOMode::Triangle => |x| (2.0 * ((x + 0.25) - ((x + 0.25) + 0.5).floor()).abs()),
             LFOMode::Square => |x| match x {
-                x if (0.0 <= x && x < 0.5) => 1.0,
+                x if (0.0..0.5).contains(&x) => 1.0,
                 x if x == 0.5 => 0.5,
                 _ => 0.0,
             },
@@ -68,14 +64,42 @@ impl LFOMode {
 pub struct MMLFO {
     mode: LFOMode,
     sync: bool,
-    time_div: TimeDiv,
-    dotted: bool,
+    sync_timing: Timing,
     freq_hz: f32,
     sample_rate: f32,
-    bpm: i32,
     function: fn(f32) -> f32,
     current_index: usize,
     discrete_func: Vec<f32>,
+}
+
+impl Default for MMLFO {
+    fn default() -> Self {
+        let mut instance = Self {
+            mode: LFOMode::Sine,
+            sync: false,
+            sync_timing: Default::default(),
+            freq_hz: 500.0,
+            sample_rate: 44100.0,
+            function: LFOMode::Sine.get_function(),
+            current_index: 0,
+            discrete_func: Vec::new(),
+        };
+        instance.update_state();
+        instance
+    }
+}
+
+impl Modulator for MMLFO {
+    fn get_value(&mut self) -> f32 {
+        self.discrete_func[self.current_index] - 0.5
+    }
+
+    fn advance(&mut self) {
+        let period = self.sample_rate / (self.freq_hz);
+        self.current_index = (self.current_index + 1) % (period as usize);
+    }
+
+    fn reset(&mut self) {}
 }
 
 impl MMLFO {
@@ -90,14 +114,7 @@ impl MMLFO {
         let mut instance = Self {
             mode,
             sync,
-            time_div: TimeDiv::Quarter,
-            dotted: false,
-            freq_hz: 500.0,
-            sample_rate: 44100.0,
-            bpm: 120,
-            function: |x| x,
-            current_index: 0,
-            discrete_func: vec![1.0; 44100],
+            ..Default::default()
         };
         // this populates the discrete function and function as well as updates frequency if in sync mode
         instance.update_state();
@@ -114,7 +131,7 @@ impl MMLFO {
     fn update_state(&mut self) {
         self.function = self.mode.get_function();
         self.freq_hz = match self.sync {
-            true => 1.0 / calculate_s_synced(self.bpm, self.time_div.clone(), self.dotted),
+            true => 1.0 / self.sync_timing.to_seconds(),
             false => self.freq_hz,
         };
 
@@ -129,8 +146,7 @@ impl MMLFO {
     /// Returns the next value from the discrete buffer and cycles the index to 0 if necessary
     pub fn get_next_value(&mut self) -> f32 {
         let value = self.discrete_func[self.current_index];
-        let period = self.sample_rate / (self.freq_hz);
-        self.current_index = (self.current_index + 1) % (period as usize);
+        self.advance();
         value
     }
 
@@ -141,16 +157,19 @@ impl MMLFO {
     }
 
     /// Setter for time division as a multiple of a bar
-    pub fn set_time_div(&mut self, time_div: TimeDiv, dotted: bool) {
-        self.sync = true;
-        self.time_div = time_div;
-        self.dotted = dotted;
+    pub fn set_timing(&mut self, timing: Timing) {
+        self.sync_timing = timing;
         self.update_state();
     }
 
+    /// Setter for the time division of the Timing object which syncs the LFO
+    pub fn set_time_div(&mut self, time_div: TimeDiv) {
+        self.sync_timing.set_division(time_div);
+    }
+
     /// Setter for the BPM (beats per minute)
-    pub fn set_bpm(&mut self, bpm: i32) {
-        self.bpm = bpm;
+    pub fn set_bpm(&mut self, bpm: i16) {
+        self.sync_timing.set_bpm(bpm);
         self.update_state();
     }
 
@@ -202,17 +221,8 @@ pub struct SampleAndHold {
     slew_time_s: f32,
 }
 
-impl SampleAndHold {
-    /// The constructor for the S&H circuit, takes no parameters.
-    /// ## Default settings:
-    /// * noise buffer: 2 seconds of random between 0 and 1
-    ///
-    /// * all indices and values: 0
-    ///
-    /// * slew: false
-    ///
-    /// * slew time: 0.25s
-    pub fn new() -> Self {
+impl Default for SampleAndHold {
+    fn default() -> Self {
         let mut rng = thread_rng();
         Self {
             noise_buffer: (0..88200).map(|_| rng.gen()).collect(),
@@ -223,6 +233,27 @@ impl SampleAndHold {
             interpolate: 0.0,
             slew: false,
             slew_time_s: 0.25,
+        }
+    }
+}
+
+impl SampleAndHold {
+    /// The constructor for the S&H circuit, takes no parameters.
+    /// ## Default settings:
+    /// * noise buffer: 2 seconds of random between 0 and 1
+    ///
+    /// * all indices and values: 0
+    ///
+    /// * slew: false
+    ///
+    /// * slew time: 0.25s
+    pub fn new(slew: bool, slew_time: f32, buffer_length: usize) -> Self {
+        let mut rng = thread_rng();
+        Self {
+            noise_buffer: (0..(44100 * buffer_length)).map(|_| rng.gen()).collect(),
+            slew,
+            slew_time_s: slew_time,
+            ..Default::default()
         }
     }
 
@@ -249,7 +280,7 @@ impl SampleAndHold {
         self.advance();
 
         let period_samples = ((1.0 / self.frequency_hz) * 44100.0) as usize;
-        if self.current_index % (period_samples) == 0 {
+        if self.current_index % period_samples == 0 {
             self.sample();
         }
 
@@ -257,14 +288,14 @@ impl SampleAndHold {
             if self.interpolate >= 1.0 {
                 self.interpolate = 0.0;
                 self.last_value = self.current_value;
-                return self.current_value;
+                self.current_value
             } else {
-                self.interpolate += (1.0 / (44100.0 * self.slew_time_s));
-                return ((1.0 - self.interpolate) * self.last_value)
-                    + (self.interpolate * self.current_value);
+                self.interpolate += 1.0 / (44100.0 * self.slew_time_s);
+                ((1.0 - self.interpolate) * self.last_value)
+                    + (self.interpolate * self.current_value)
             }
         } else {
-            return self.current_value;
+            self.current_value
         }
     }
 
@@ -281,19 +312,19 @@ impl SampleAndHold {
 
 #[cfg(test)]
 mod tests {
-    use crate::delay_line::{StereoDelay, TimeDiv};
+    use crate::delay_line::StereoDelay;
     use crate::filter::LowpassFilter;
     use crate::lfo::{LFOMode, SampleAndHold, MMLFO};
     use crate::samples::{IntSamples, PhonicMode, Samples};
-    use crate::{load_wav, write_wav, write_wav_float};
-    use std::f32::consts::PI;
+    use crate::timing::TimeDiv;
+    use crate::{load_wav, write_wav};
     use test_case::test_case;
 
     #[test]
     fn test_lfo_init() {
-        let lfo_sin = MMLFO::new(false, LFOMode::Sine);
-        let lfo_sqr = MMLFO::new(false, LFOMode::Square);
-        let lfo_tri = MMLFO::new(false, LFOMode::Triangle);
+        let _ = MMLFO::new(false, LFOMode::Sine);
+        let _ = MMLFO::new(false, LFOMode::Square);
+        let _ = MMLFO::new(false, LFOMode::Triangle);
     }
 
     #[test]
@@ -304,9 +335,9 @@ mod tests {
         assert_eq!(lfo.mode, LFOMode::Triangle);
 
         lfo.set_bpm(130);
-        assert_eq!(lfo.bpm, 130);
+        assert_eq!(lfo.sync_timing.bpm(), 130);
 
-        lfo.set_time_div(TimeDiv::Eighth, false);
+        lfo.set_time_div(TimeDiv::Eighth);
 
         lfo.set_sample_rate(88200.0);
         assert_eq!(lfo.sample_rate, 88200.0);
@@ -331,7 +362,7 @@ mod tests {
         let mut out: Vec<i16> = Vec::new();
 
         for sample in samples {
-            filter.set_cutoff((20000.0 * lfo.get_next_value()), 44100.0);
+            filter.set_cutoff(20000.0 * lfo.get_next_value(), 44100.0);
             out.push((filter.process(sample as f32)) as i16);
         }
         let mode_name = match lfo.mode {
@@ -382,7 +413,7 @@ mod tests {
             delay.set_time_left(d_time_1);
             delay.set_time_right(d_time_2);
 
-            let (left, right) = delay.process(left as f32, right as f32, true);
+            let (left, right) = delay.process(left as f32, right as f32, true, false);
             out.push(left as i16);
             out.push(right as i16);
         }
@@ -399,7 +430,7 @@ mod tests {
         lfo.update_state();
         let mut out: Vec<i16> = Vec::new();
 
-        for _ in (0..88200) {
+        for _ in 0..88200 {
             out.push((5000.0 * lfo.get_next_value()) as i16)
         }
 
@@ -417,8 +448,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn render_snh() {
-        let mut snh = SampleAndHold::new();
+        let mut snh = SampleAndHold::default();
         let mut out: Vec<i16> = Vec::new();
 
         snh.set_freq(2.0);

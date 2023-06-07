@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![warn(missing_docs)]
 //! Implementing a first order filter with transfer function H(S) = w_0 / s + w_0
-/// x, y and a0 ... are used due to their correspondence with difference equations
+//! x, y and a0 ... are used due to their correspondence with difference equations
 
 #[derive(Debug)]
 /// The coefficients of a first order filter where a0 is normalized to 1
@@ -26,6 +26,15 @@ impl LPCoefficients {
     #[allow(missing_docs)]
     pub fn get_coeffs(&self) -> (f32, f32, f32) {
         (self.a1, self.b0, self.b1)
+    }
+
+    /// Recompute the filter coefficients based on a change in cutoff frequency and or sample rate
+    pub fn recompute(&mut self, cutoff_freq: f32, sample_rate: f32) {
+        let dt: f32 = 1.0 / sample_rate;
+        let a0: f32 = (cutoff_freq * dt) + 2.0;
+        self.a1 = (2.0 - cutoff_freq * dt) / a0;
+        self.b0 = (cutoff_freq * dt) / a0;
+        self.b1 = (cutoff_freq * dt) / a0;
     }
 }
 
@@ -73,6 +82,11 @@ impl LowpassFilter {
         };
         self.y[n]
     }
+
+    /// Setter for filter cutoff frequency. Wrapper for recompute coefficients
+    pub fn set_cutoff(&mut self, cutoff_freq: f32, sample_rate: f32) {
+        self.coeffs.recompute(cutoff_freq, sample_rate)
+    }
 }
 
 #[cfg(test)]
@@ -91,9 +105,8 @@ mod tests {
         let mut filter = LowpassFilter::new(600.0, 44100.0, 44100);
         let mut out_samples: Vec<i16> = Vec::new();
 
-        for n in 0..in_samples.len() {
-            let xn = in_samples[n];
-            let yn = filter.process(xn);
+        for xn in &in_samples {
+            let yn = filter.process(*xn);
             out_samples.push(yn as i16);
         }
         write_wav(

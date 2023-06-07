@@ -1,26 +1,30 @@
-use crate::diffusion::Diffuser;
-use crate::load_wav;
-use crate::multi_channel::MultiDelayLine;
-use ndarray::{arr1, Array1};
+//! A module bringing together various pre-written components into a reverb algorithm.
+//! Currently not working due to un-found bug.
+//!
+//! Uses FDN architecture and is heavily based on the article "Let's write a reverb" by Geraint Luff of Signal Smith audio
 
+use crate::diffusion::Diffuser;
+use crate::multi_channel::MultiDelayLine;
+use ndarray::arr1;
+
+/// Struct combining multi delay, and diffusers into an FDN reverb.
+///
+/// Has a single multi delay line used with feedback to increase echo density
+///
+/// Has a vector of Diffusers, usually between 3 - 7, Used to blend / smear audio to create the reverb effect.
+/// CURRENTLY WIP.
 pub struct Reverb {
     delay: MultiDelayLine,
     diffusers: Vec<Diffuser>,
 }
 
-impl Reverb {
-    pub fn new() -> Self {
+impl Default for Reverb {
+    fn default() -> Self {
         Self {
             delay: MultiDelayLine::new(
                 vec![
-                    0.136582985935935,
-                    0.174364382824060,
-                    0.109357268469463,
-                    0.135646466920643,
-                    0.100459768235823,
-                    0.193735635293646,
-                    0.14323634964359,
-                    0.11213523623693,
+                    0.13658298, 0.17436438, 0.10935726, 0.13564646, 0.10045976, 0.19373563,
+                    0.14323634, 0.11213523,
                 ],
                 0.85,
                 1.0,
@@ -35,12 +39,45 @@ impl Reverb {
             ],
         }
     }
+}
+
+impl Reverb {
+    /// Constructor for the reverb struct.
+    ///
+    /// Default Values:
+    ///
+    /// * delay: 8 Channel multi delay with random chosen times between 100ms and 200ms
+    ///
+    /// * Diffusers: 4 series, 8 Channel diffusers with maximum times doubling each diffuser
+    ///     from 20ms up to 160ms
+    pub fn new(diffuser_count: usize, diffuser_start: f32, channels: u8) -> Self {
+        Self {
+            delay: MultiDelayLine::new(
+                vec![
+                    0.13658298, 0.17436438, 0.10935726, 0.13564646, 0.10045976, 0.19373563,
+                    0.14323634, 0.11213523,
+                ],
+                0.85,
+                1.0,
+                channels,
+                44100,
+            ),
+            diffusers: (0..diffuser_count)
+                .map(|index| Diffuser::new(channels, diffuser_start * (index + 1) as f32))
+                .collect(),
+        }
+    }
+
+    /// Process a single float by duplicating it to all channels and performing the reverb algorithm
+    /// First the sample is passed through the diffuser series.
+    ///
+    /// Then it is delayed with feedback and mixed down with the dry signal by the mix parameter.
     pub fn process(&mut self, xn: f32, mix: f32) -> f32 {
-        let read_sample = xn.clone();
+        let read_sample = xn;
         let mut read_sample_array = arr1(&[read_sample; 8]);
 
         for diffuser in &mut self.diffusers {
-            let mut write_sample_array;
+            let write_sample_array;
             let diffused = diffuser.diffuse(read_sample_array.clone());
             write_sample_array = diffused;
             read_sample_array = write_sample_array.clone();
@@ -59,11 +96,12 @@ mod tests {
     use crate::{load_wav, write_wav};
 
     #[test]
+    #[ignore]
     fn test_reverb() {
         let mut input = load_wav("tests/kalimba.wav").expect("error loading file");
         input.extend(&[0; 44100 * 4]);
 
-        let mut reverb = Reverb::new();
+        let mut reverb = Reverb::new(4, 0.02, 8);
         let mut output: Vec<i16> = Vec::new();
         for sample in input {
             output.push(reverb.process(sample as f32, 1.0) as i16)

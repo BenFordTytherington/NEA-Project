@@ -1,4 +1,4 @@
-//!A module implementing an ADSR envelope and its associated functions.
+//! A module implementing an ADSR envelope and its associated functions.
 use fast_math::exp;
 
 /// A 4-stage Attack-Decay-Sustain-Release envelope, triggered by gate
@@ -53,17 +53,34 @@ impl ADSREnvelope {
             current_index: 0,
             last_value: 0.0,
             attack_time,
-            attack_curve: 3.0,
+            attack_curve: 8.0,
             decay_time,
-            decay_curve: -3.0,
+            decay_curve: 8.0,
             sustain_level,
             release_time,
-            release_curve: -5.0,
+            release_curve: 8.0,
             ad_discrete: Vec::with_capacity((attack_time + decay_time) as usize * 44100),
             r_discrete: Vec::with_capacity(release_time as usize * 44100),
             finished_ad_stage: false,
             gate: false,
         }
+    }
+
+    pub fn set_attack(&mut self, attack_time: f32) {
+        self.attack_time = attack_time;
+        self.setup();
+    }
+    pub fn set_decay(&mut self, decay_time: f32) {
+        self.decay_time = decay_time;
+        self.setup();
+    }
+    pub fn set_sustain(&mut self, sustain_level: f32) {
+        self.sustain_level = sustain_level;
+        self.setup();
+    }
+    pub fn set_release(&mut self, release_time: f32) {
+        self.release_time = release_time;
+        self.setup();
     }
 
     /// Populates the discrete function vectors based off the parameters and the equations.
@@ -109,11 +126,11 @@ impl ADSREnvelope {
     /// If not and gate is held, the sustain level is returned.
     /// Once released, the Release buffer is iterated.
     pub fn get_next_sample(&mut self) -> f32 {
-        let mut value: f32;
+        let value: f32;
 
         if self.gate {
             // attack - decay finished, give sustain sample
-            if self.ad_discrete.len() == 0 || (self.current_index >= self.ad_discrete.len() - 1) {
+            if self.ad_discrete.is_empty() || (self.current_index >= self.ad_discrete.len() - 1) {
                 self.finished_ad_stage = true;
                 value = self.sustain_level;
             }
@@ -128,7 +145,7 @@ impl ADSREnvelope {
             }
 
             // if release not finished, release sample
-            if self.ad_discrete.len() == 0 || (self.current_index >= self.r_discrete.len() - 1) {
+            if self.ad_discrete.is_empty() || (self.current_index >= self.r_discrete.len() - 1) {
                 value = 0.0;
             }
             // if release finished, 0.0
@@ -184,7 +201,6 @@ mod tests {
     use crate::envelope::ADSREnvelope;
     use crate::samples::PhonicMode;
     use crate::write_wav;
-    use fast_math::exp;
 
     #[test]
     #[ignore]

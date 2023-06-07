@@ -7,6 +7,8 @@
 
 use crate::delay_buffer::DelayBuffer;
 use crate::filter::LowpassFilter;
+use crate::saturation::Saturator;
+use crate::timing::Timing;
 
 /// A delay line which can process inputs with internal feedback and internal filtering as well as dry/wet mix control
 /// # Attributes
@@ -49,9 +51,12 @@ impl DelayLine {
     /// A function which processes a single sample and returns a tuple of 2 processed samples
     /// # Parameters
     /// * `xn`: The input sample to be processed, named this way because of the nomenclature on block diagrams and difference equations
-    pub fn process_with_feedback(&mut self, xn: f32) -> (f32, f32) {
+    pub fn process_with_feedback(&mut self, xn: f32, do_filtering: bool) -> (f32, f32) {
         let delay_signal: f32 = self.buffer.read(self.delay_samples);
-        let feedback_signal: f32 = self.filter.process(delay_signal) * self.internal_feedback;
+        let feedback_signal: f32 = match do_filtering {
+            true => self.filter.process(delay_signal) * self.internal_feedback,
+            false => delay_signal * self.internal_feedback,
+        };
 
         self.buffer.write(xn + feedback_signal);
 
@@ -66,6 +71,11 @@ impl DelayLine {
     #[allow(missing_docs)]
     pub fn get_delay_samples(&self) -> usize {
         self.delay_samples
+    }
+
+    #[allow(missing_docs)]
+    pub fn delay_samples(&self) -> &usize {
+        &self.delay_samples
     }
 
     #[allow(missing_docs)]
@@ -89,46 +99,12 @@ impl DelayLine {
     }
 }
 
-/// An enum used for time divisions relative to a bar.
-/// Whole is 1 bar
-/// Half is 2 beats
-/// Quarter is 1 beat
-/// Eighth is an Eighth note or half a beat
-/// Sixteenth is a Sixteenth note or a quarter of a beat
-pub enum TimeDiv {
-    Whole,
-    Half,
-    Quarter,
-    Eighth,
-    Sixteenth,
-}
-
-/// A function to calculate the amount of time in seconds that a given unit of music time takes provided the bpm
-/// # Parameters
-/// * `bpm`: The tempo in beats per minute
-/// * `division`: The time division relative to a bar
-/// * `dotted`: Whether or not to dot the note (meaning multiply its length by 1.5)
-fn calculate_s_synced(bpm: i32, division: TimeDiv, dotted: bool) -> f32 {
-    let divisor: f32 = match division {
-        TimeDiv::Whole => 1.0,
-        TimeDiv::Half => 2.0,
-        TimeDiv::Quarter => 4.0,
-        TimeDiv::Eighth => 8.0,
-        TimeDiv::Sixteenth => 16.0,
-    };
-
-    let measure_length_s: f32 = 240.0 / bpm as f32;
-    let mut length = measure_length_s / divisor;
-    if dotted {
-        length *= 1.5
-    }
-    length
-}
-
 /// A struct capturing full delay functionality with independent left and right delay lines.
 pub struct StereoDelay {
     left_dl: DelayLine,
     right_dl: DelayLine,
+    sample_rate: f32,
+    saturator: Saturator,
 }
 
 impl StereoDelay {
@@ -140,7 +116,7 @@ impl StereoDelay {
     /// * `feedback`: The internal feedback multiplier for `DelayLine`
     /// * `mix`: The internal wet/dry mix level for `DelayLine`
     pub fn new(
-        sample_rate: f64,
+        sample_rate: f32,
         delay_seconds_l: f64,
         delay_seconds_r: f64,
         feedback: f32,
@@ -149,37 +125,42 @@ impl StereoDelay {
         let max_delay_samples = sample_rate as usize + 1;
 
         // conversion between seconds and samples using provided sample rate
-        let delay_samples_l = (sample_rate * delay_seconds_l) as usize;
-        let delay_samples_r = (sample_rate * delay_seconds_r) as usize;
+        let delay_samples_l = (sample_rate as f64 * delay_seconds_l) as usize;
+        let delay_samples_r = (sample_rate as f64 * delay_seconds_r) as usize;
 
         let left_dl = DelayLine::new(max_delay_samples, delay_samples_l, feedback, mix);
         let right_dl = DelayLine::new(max_delay_samples, delay_samples_r, feedback, mix);
-        Self { left_dl, right_dl }
+        Self {
+            left_dl,
+            right_dl,
+            sample_rate,
+            saturator: Saturator::new(i16::MAX as f32 / 64.0, 0.5),
+        }
     }
 
     /// Constructs a new StereoDelay object with 2 delay lines which have separate delay times, specified as a time division
     /// # Parameters
     /// * `sample_rate`: The sample rate to use in Hz
-    /// * `delay_div_l`: The length of the left delay line as a time division
-    /// * `dotted_left`: Whether or not to dot the note of the time division of the left delay line
-    /// * `delay_div_r`: The length of the right delay line as a time division
-    /// * `dotted_right`: Whether or not to dot the note of the time division of the right delay line
+    ///
+    /// * `timing_left`: A timing object used to represent the time at a bpm for the left delay to repeat
+    ///
+    /// * `timing_right`: A timing object used to represent the time at a bpm for the right delay to repeat
+    ///
     /// * `feedback`: The internal feedback multiplier for `DelayLine`
+    ///
     /// * `mix`: The internal wet/dry mix level for `DelayLine`
+    ///
     pub fn new_sync(
         sample_rate: f32,
-        bpm: i32,
-        delay_div_left: TimeDiv,
-        dotted_left: bool,
-        delay_div_right: TimeDiv,
-        dotted_right: bool,
+        timing_left: Timing,
+        timing_right: Timing,
         feedback: f32,
         mix: f32,
     ) -> Self {
         let max_delay_samples = sample_rate as usize + 1;
 
-        let delay_seconds_l = calculate_s_synced(bpm, delay_div_left, dotted_left);
-        let delay_seconds_r = calculate_s_synced(bpm, delay_div_right, dotted_right);
+        let delay_seconds_l = timing_left.to_seconds();
+        let delay_seconds_r = timing_right.to_seconds();
 
         // conversion between seconds and samples using provided sample rate
         let delay_samples_l = (sample_rate * delay_seconds_l) as usize;
@@ -187,39 +168,56 @@ impl StereoDelay {
 
         let left_dl = DelayLine::new(max_delay_samples, delay_samples_l, feedback, mix);
         let right_dl = DelayLine::new(max_delay_samples, delay_samples_r, feedback, mix);
-        Self { left_dl, right_dl }
+        Self {
+            left_dl,
+            right_dl,
+            sample_rate,
+            saturator: Saturator::new(i16::MAX as f32 / 64.0, 0.5),
+        }
     }
 
     /// Returns a tuple of samples (left, right) which have been processed through the delay line
-    pub fn process(&mut self, in_sample_l: f32, in_sample_r: f32) -> (f32, f32) {
-        let (out_left, _) = self.left_dl.process_with_feedback(in_sample_l);
+    pub fn process(
+        &mut self,
+        in_sample_l: f32,
+        in_sample_r: f32,
+        do_filtering: bool,
+        saturate: bool,
+    ) -> (f32, f32) {
+        let (out_left, _) = self
+            .left_dl
+            .process_with_feedback(in_sample_l, do_filtering);
 
-        let (out_right, _) = self.right_dl.process_with_feedback(in_sample_r);
-        (out_left, out_right)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::delay_line::{calculate_s_synced, TimeDiv};
-
-    #[test]
-    fn test_time_calculator() {
-        let correct_times: Vec<f32> = vec![1.714, 0.857, 0.429, 0.214, 0.107];
-        let calc_times: Vec<f32> = [
-            TimeDiv::Whole,
-            TimeDiv::Half,
-            TimeDiv::Quarter,
-            TimeDiv::Eighth,
-            TimeDiv::Sixteenth,
-        ]
-        .into_iter()
-        .map(|time_d| calculate_s_synced(140, time_d, false))
-        .collect();
-
-        for index in 0..5 {
-            let diff = (correct_times[index] - calc_times[index]).abs();
-            assert!(diff <= 0.001)
+        let (out_right, _) = self
+            .right_dl
+            .process_with_feedback(in_sample_r, do_filtering);
+        match saturate {
+            false => (out_left, out_right),
+            true => (
+                self.saturator.process(out_left),
+                self.saturator.process(out_right),
+            ),
         }
+    }
+
+    /// Setter for left delay line time in seconds
+    pub fn set_time_left(&mut self, time_s: f32) {
+        self.left_dl.delay_samples = (self.sample_rate * time_s) as usize
+    }
+
+    /// Setter for right delay line time in seconds
+    pub fn set_time_right(&mut self, time_s: f32) {
+        self.right_dl.delay_samples = (self.sample_rate * time_s) as usize
+    }
+
+    pub fn set_saturation_factor(&mut self, factor: f32) {
+        self.saturator.set_threshold(i16::MAX as f32 / factor);
+    }
+
+    pub fn get_times(&self) -> (f32, f32) {
+        (
+            self.left_dl.get_delay_seconds(),
+            self.right_dl.get_delay_seconds(),
+        )
     }
 }

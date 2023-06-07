@@ -1,25 +1,35 @@
-#![warn(missing_docs)]
 //! A crate containing the main code for the plugin and some helper functions.
 //! GranularPlugin is the main plugin, using the NIH-plug framework to build to the VST3 and CLAP formats.
 //! stat() is used for integration tests.
 //! load_wav() and its float counterpart load samples from a .wav file.
 //! write_wav() and its float counterpart write samples to a .wav file.
+#![warn(missing_docs)]
 
 extern crate core;
 
 pub mod delay_buffer;
 pub mod delay_line;
 pub mod diffusion;
+pub mod envelope;
 pub mod filter;
+pub mod grain;
+pub mod interpolators;
+pub mod lfo;
+pub mod midi;
+pub mod modulation;
 pub mod multi_channel;
+pub mod resample;
 pub mod reverb;
 pub mod samples;
+pub mod saturation;
+pub mod smoothers;
+pub mod timing;
 
 use samples::PhonicMode;
 use std::num::NonZeroU32;
 
 use crate::delay_line::StereoDelay;
-use hound;
+use hound::{Error, SampleFormat, WavReader, WavSpec, WavWriter};
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
@@ -142,7 +152,7 @@ impl Plugin for GranularPlugin {
             let left = *channel_samples.get_mut(0).unwrap();
             let right = *channel_samples.get_mut(1).unwrap();
 
-            let (processed_l, processed_r) = self.delay.process(left, right);
+            let (processed_l, processed_r) = self.delay.process(left, right, true, true);
             *channel_samples.get_mut(0).unwrap() = processed_l;
             *channel_samples.get_mut(1).unwrap() = processed_r;
         }
@@ -169,7 +179,7 @@ impl Vst3Plugin for GranularPlugin {
 
 /// Function used in integration tests to ensure the code can be accessed from an external module
 pub fn stat() -> i16 {
-    return 200;
+    200
 }
 
 /// loads a wav file from string path and returns a result type possibly containing a vector of integer samples
@@ -177,8 +187,8 @@ pub fn stat() -> i16 {
 /// * A result type containing either a vector of i16 samples or a hound error
 /// # Parameters
 /// * `path`: A string containing the relative path to the file to be loaded (must include .wav file extension)
-pub fn load_wav(path: &str) -> Result<Vec<i16>, hound::Error> {
-    let mut reader = hound::WavReader::open(path)
+pub fn load_wav(path: &str) -> Result<Vec<i16>, Error> {
+    let mut reader = WavReader::open(path)
         .expect("Test audio should be in tests directory and have the path specified");
     let mut samples: Vec<i16> = vec![];
 
@@ -198,8 +208,8 @@ pub fn load_wav(path: &str) -> Result<Vec<i16>, hound::Error> {
 /// * A result type containing either a vector of f32 samples or a hound error
 /// # Parameters
 /// * `path`: A string containing the relative path to the file to be loaded (must include .wav file extension)
-pub fn load_wav_float(path: &str) -> Result<Vec<f32>, hound::Error> {
-    let mut reader = hound::WavReader::open(path)
+pub fn load_wav_float(path: &str) -> Result<Vec<f32>, Error> {
+    let mut reader = WavReader::open(path)
         .expect("Test audio should be in tests directory and have the path specified");
     let mut samples: Vec<f32> = vec![];
 
@@ -225,14 +235,14 @@ pub fn write_wav(path: &str, samples: Vec<i16>, mode: PhonicMode) {
         PhonicMode::Stereo => 2,
     };
 
-    let spec = hound::WavSpec {
+    let spec = WavSpec {
         channels,
         sample_rate: 44100,
         bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
+        sample_format: SampleFormat::Int,
     };
 
-    let mut writer = hound::WavWriter::create(path, spec).expect("could not create writer");
+    let mut writer = WavWriter::create(path, spec).expect("could not create writer");
 
     for sample in samples {
         writer
@@ -253,14 +263,14 @@ pub fn write_wav_float(path: &str, samples: Vec<f32>, mode: PhonicMode) {
         PhonicMode::Stereo => 2,
     };
 
-    let spec = hound::WavSpec {
+    let spec = WavSpec {
         channels,
         sample_rate: 44100,
         bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
+        sample_format: SampleFormat::Float,
     };
 
-    let mut writer = hound::WavWriter::create(path, spec).expect("could not create writer");
+    let mut writer = WavWriter::create(path, spec).expect("could not create writer");
 
     for sample in samples {
         writer
@@ -270,50 +280,34 @@ pub fn write_wav_float(path: &str, samples: Vec<f32>, mode: PhonicMode) {
     writer.finalize().expect("issue with finalization")
 }
 
-// the dynamic dispatch start implementation
-// pub fn write_wav(path: &str, samples: Vec<dyn Num>, mode: PhonicMode, format: &str) {
-//     let channels: u16 = match mode {
-//         PhonicMode::Mono => 1,
-//         PhonicMode::Stereo => 2,
-//     };
-//
-//     // although the current system exclusively uses stereo channels and will create stereo from mono input by doubling,
-//     // mono writing could be useful for testing in the future.
-//
-//     // converts input string to a hound sample format
-//     let sample_format = match format {
-//         "int" => hound::SampleFormat::Int,
-//         "float" => hound::SampleFormat::Float,
-//         _ => panic!("format should either be 'int' or 'float'"),
-//     };
-//
-//     let spec = hound::WavSpec {
-//         channels,
-//         sample_rate: 44100,
-//         bits_per_sample: 16,
-//         sample_format,
-//     };
-//
-//     let mut writer = hound::WavWriter::create(path, spec).expect("could not create writer");
-//
-//     for sample in samples {
-//         writer
-//             .write_sample(sample)
-//             .expect("error occurred while writing sample");
-//     }
-//     writer.finalize().expect("issue with finalization")
-// }
+/// Create a vector of floats distributed uniformly between a minimum and maximum in N channels. Returns a vector of length `channels`
+pub fn distribute_uniform(channels: i8, min: f32, max: f32) -> Vec<f32> {
+    let float_channels = channels as f32;
+    let delta = max - min;
+    (0..channels)
+        .map(|ch_num| ((ch_num as f32 / float_channels) * (delta)) + min)
+        .collect()
+}
+
+/// Create a vector of floats distributed exponentially between a minimum and maximum in N channels. Returns a vector of length `channels`
+pub fn distribute_exponential(channels: i8, delay_base: f32) -> Vec<f32> {
+    let float_channels = channels as f32;
+    (0..channels)
+        .map(|ch_num| 2.0_f32.powf(ch_num as f32 / float_channels) * delay_base)
+        .collect()
+}
 
 nih_export_vst3!(GranularPlugin);
 nih_export_clap!(GranularPlugin);
 
 #[cfg(test)]
 mod tests {
-    use crate::delay_line::TimeDiv;
+    use crate::delay_line::StereoDelay;
     use crate::multi_channel::MultiDelayLine;
-    use crate::samples::{PhonicMode, Samples};
-    use crate::{delay_line, load_wav, load_wav_float, samples, write_wav, write_wav_float};
-    use ndarray::Array1;
+    use crate::samples::{IntSamples, PhonicMode, Samples};
+    use crate::timing::{NoteModifier, TimeDiv, Timing};
+    use crate::{distribute_exponential, load_wav, write_wav};
+    use ndarray::{arr1, Array1};
     use test_case::test_case;
 
     // Reverb Algorithm
@@ -324,7 +318,7 @@ mod tests {
         in_samples.extend_from_slice(&[0; (44100 * 6)]);
 
         let mut delay = MultiDelayLine::new(
-            vec![0.03237569, 0.0557472990, 0.0587274724, 0.08126467282],
+            vec![0.03237569, 0.05574729, 0.05872747, 0.08126467],
             0.8,
             0.25,
             4,
@@ -332,7 +326,7 @@ mod tests {
         );
 
         let mut out_samples = Vec::new();
-        for (index, sample) in in_samples.iter_mut().enumerate() {
+        for sample in in_samples.iter_mut() {
             let sample_vec = Array1::from(vec![*sample as f32; 4]);
             let out_sample = delay.process_with_feedback(sample_vec, true);
             let summed: f32 = out_sample.iter().sum();
@@ -348,11 +342,8 @@ mod tests {
     // Delay Algorithm
     #[test_case(
         "tests/kalimba_filter_5KHz_delay.wav",
-        80,
-        TimeDiv::Sixteenth,
-        false,
-        TimeDiv::Eighth,
-        true,
+        Timing::new(TimeDiv::Quarter, 80, NoteModifier::Regular),
+        Timing::new(TimeDiv::Quarter, 80, NoteModifier::Dotted),
         0.65,
         0.45;
         "amen break through delay with feedback filter. Eighth and dotted eighth times. 55% feedback 45% mix"
@@ -361,30 +352,17 @@ mod tests {
     /// Test which renders the effects of the delay algorithm to a file based on an input file
     fn test_delay(
         filename: &str,
-        bpm: i32,
-        delay_div_left: TimeDiv,
-        dotted_left: bool,
-        delay_div_right: TimeDiv,
-        dotted_right: bool,
+        timing_left: Timing,
+        timing_right: Timing,
         feedback: f32,
         mix: f32,
     ) {
         // the delay times are chosen based on time divisions at the tempo of the audio being processed
-        let mut delay = delay_line::StereoDelay::new_sync(
-            44100.0,
-            bpm,
-            delay_div_left,
-            dotted_left,
-            delay_div_right,
-            dotted_right,
-            feedback,
-            mix,
-        );
+        let mut delay = StereoDelay::new_sync(44100.0, timing_left, timing_right, feedback, mix);
 
         // creating a sample struct with the test audio (amen break)
-        let in_samples = samples::IntSamples::new(
-            load_wav("tests/kalimba.wav").expect("error occurred loading file"),
-        );
+        let in_samples =
+            IntSamples::new(load_wav("tests/kalimba.wav").expect("error occurred loading file"));
 
         // initializing output vectors in stereo
         let mut out_l: Vec<i16> = Vec::new();
@@ -392,20 +370,20 @@ mod tests {
 
         // process frames of stereo audio and write them to the output for left and right
         for (left, right) in in_samples.get_frames() {
-            let (l, r) = delay.process(left as f32, right as f32);
+            let (l, r) = delay.process(left as f32, right as f32, true, false);
             out_l.push(l as i16);
             out_r.push(r as i16);
         }
 
         // processing tail time seconds worth of 0s to capture the tail of the delay
         for _ in 0..(44100 * 3) {
-            let (l, r) = delay.process(0.0, 0.0);
+            let (l, r) = delay.process(0.0, 0.0, true, false);
             out_l.push(l as i16);
-            out_r.push(r as i16)
+            out_r.push(r as i16);
         }
 
         // initialize new sample vector from stereo inputs. from stereo interleaves the samples into a single vector
-        let out_samples = samples::IntSamples::from_stereo(out_l, out_r);
+        let out_samples = IntSamples::from_stereo(&out_l, &out_r);
         write_wav(filename, out_samples.samples(), PhonicMode::Stereo);
     }
 
@@ -427,6 +405,83 @@ mod tests {
     #[ignore]
     fn wav_file_loads_incorrectly() {
         load_wav("doesnt/exist.wav").expect("wav file loaded incorrectly");
+    }
+
+    #[test]
+    #[ignore]
+    fn strip_start() {
+        let in_samples = load_wav("tests/sine.wav").unwrap();
+        let mut out: Vec<i16> = Vec::new();
+        let mut found_start = false;
+
+        for sample in in_samples {
+            if !found_start {
+                if sample == 0 {
+                    continue;
+                } else {
+                    found_start = true
+                }
+            } else {
+                out.push(sample);
+            }
+        }
+        let stereo_samples = IntSamples::from_mono(&out);
+        write_wav("tests/sine.wav", out, PhonicMode::Mono);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_all_examples() {
+        let mut in_samples_1: Vec<i16> = load_wav("tests/pulse.wav").unwrap();
+        in_samples_1.extend(&[0; (44100 * 4)]);
+
+        // single delay
+        let mut single_delay_1 = StereoDelay::new(44100.0, 0.08, 0.08, 0.85, 0.85);
+        let mut out_1: Vec<i16> = Vec::new();
+
+        for sample in in_samples_1.clone() {
+            out_1.push(
+                single_delay_1
+                    .process(sample as f32, sample as f32, false, false)
+                    .0 as i16,
+            );
+        }
+
+        let single_delayed_samples_1 = IntSamples::from_mono(&out_1);
+
+        write_wav(
+            "tests/debug/single_delayed_pulse.wav",
+            single_delayed_samples_1.samples(),
+            PhonicMode::Stereo,
+        );
+        // multi delay
+        let times_s: Vec<f32> = distribute_exponential(8, 0.15);
+
+        let mut multi_delay_1 = MultiDelayLine::new(times_s, 0.85, 0.85, 8, 44100);
+
+        out_1.clear();
+
+        for sample in in_samples_1.clone() {
+            let sample_array = arr1(&[sample as f32; 8]);
+            let sum = multi_delay_1
+                .process_with_feedback(sample_array, false)
+                .sum();
+            out_1.push((sum / 4.0) as i16);
+        }
+
+        let multi_delayed_samples_1 = IntSamples::from_mono(&out_1);
+
+        write_wav(
+            "tests/debug/multi_delayed_pulse.wav",
+            multi_delayed_samples_1.samples(),
+            PhonicMode::Stereo,
+        );
+
+        // mixed multi
+        // 1 diffusion
+        // series all passes
+        // multi diffusion
+        // final
     }
 
     // GUI

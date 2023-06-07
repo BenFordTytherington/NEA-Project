@@ -9,40 +9,38 @@
 use crate::delay_buffer::DelayBuffer;
 use ndarray::linalg::{general_mat_vec_mul, kron};
 use ndarray::{arr1, arr2, Array, Array1, Ix1, Ix2};
-use num_traits::Pow;
 use std::f32::consts::FRAC_1_SQRT_2;
 
 /// A function generating a Hadamard matrix from given dimension
 /// # Parameters
 /// * `order`: the order of the matrix, if order is N, an N x N matrix will be returned. Must be a power of 2
-pub fn hadamard(order: i8) -> Array<f32, Ix2> {
+pub fn hadamard(order: u8) -> Array<f32, Ix2> {
     let h2 = arr2(&[[1.0, 1.0], [1.0, -1.0]]);
     // if the number of 1s in the binary representation is 1, the number is a perfect power of 2, validates that the order is a power of 2
     assert_eq!(order.count_ones(), 1);
 
-    let power = (order as f32).log2() as u32;
-    let hn = match power {
+    let power = (order as f32).log2() as u8;
+    match power {
         1 => h2,
-        n => kron(&h2, &hadamard(2_i8.pow(n - 1))),
-    };
-    hn
+        n => kron(&h2, &hadamard(2_u8.pow((n - 1).into()))),
+    }
 }
 
 /// A struct which stores a matrix and a scalar and has a method to apply mixing via matrix-vector multiplication
 pub struct HadamardMixer {
     matrix: Array<f32, Ix2>,
-    order: i8,
+    order: u8,
     scalar: f32,
 }
 
 impl HadamardMixer {
     /// The constructor for HadamardMixer, which takes in an order (number of channels) and returns an instance with the appropriately sized mixing matrix
     /// The hadamard function is extracted because it is recursive and it would not be suitable to call the constructor recursively.
-    pub fn new(order: i8) -> Self {
+    pub fn new(order: u8) -> Self {
         Self {
             matrix: hadamard(order),
             order,
-            scalar: FRAC_1_SQRT_2.pow(order / 2),
+            scalar: FRAC_1_SQRT_2.powi((order / 2) as i32),
         }
     }
 
@@ -65,7 +63,7 @@ pub struct MultiDelayLine {
     mixer: HadamardMixer,
     feedback: f32,
     times_samples: Vec<usize>,
-    num_channels: i8,
+    num_channels: u8,
     mix_ratio: f32,
 }
 
@@ -75,7 +73,7 @@ impl MultiDelayLine {
         times_s: Vec<f32>,
         feedback: f32,
         mix: f32,
-        num_channels: i8,
+        num_channels: u8,
         max_delay_samples: usize,
     ) -> Self {
         Self {

@@ -1,17 +1,21 @@
 //! Trait and Structs for performing window functional smoothing on f32 samples
-use num_traits::{pow, Pow};
 use std::f32::consts::PI;
 
 /// Trait for a smoother object, with associated window length and a method to get the next sample from the window.
 pub trait Smoother {
+    /// Return the smoother value at a specified index
     fn get_index(&self, index: usize) -> f32;
-    fn set_length(&mut self, length: usize) {}
+
+    /// Set the length of the smoother object in samples
+    fn set_length(&mut self, _length: usize) {}
 }
 
 /// Struct designed to act as a bypass in places where a type of `dyn Smoother` is required
+#[derive(Default)]
 pub struct NoSmoother {}
 
 impl NoSmoother {
+    /// Constructor for NoSmoother
     pub fn new() -> Self {
         Self {}
     }
@@ -27,12 +31,14 @@ impl Smoother for NoSmoother {
 }
 
 /// A struct which performs Hann window smoothing, using a discrete vector of samples of the window function
+#[derive(Default)]
 pub struct HannSmoother {
     length: usize,
     discrete: Vec<f32>,
 }
 
 impl HannSmoother {
+    /// Constructor for Hann window smoother. Takes no parameters and has uninitialized length and discrete buffers.
     pub fn new() -> Self {
         Self {
             length: 0,
@@ -44,7 +50,11 @@ impl HannSmoother {
 impl Smoother for HannSmoother {
     /// Getter for the next sample from the discrete function
     fn get_index(&self, index: usize) -> f32 {
-        self.discrete[index]
+        if index >= self.length {
+            self.discrete[self.length - 1]
+        } else {
+            self.discrete[index]
+        }
     }
 
     /// Setter for the length of the window function.
@@ -55,7 +65,7 @@ impl Smoother for HannSmoother {
         let delta: f32 = 1.0 / (length as f32);
         for index in 0..length {
             let cos_1: f32 = (PI * ((index as f32 * delta) - 0.5)).cos();
-            self.discrete.push(cos_1.pow(2))
+            self.discrete.push(cos_1.powi(2))
         }
     }
 }

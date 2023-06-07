@@ -8,7 +8,9 @@
 #[derive(Default)]
 pub enum PhonicMode {
     #[default]
+    /// Stereophonic (2 channels) samples
     Stereo,
+    /// Monophonic (1 channel) samples
     Mono,
 }
 /// A trait implemented on structs that hold samples
@@ -17,11 +19,14 @@ pub enum PhonicMode {
 /// * `from_mono`: constructs a struct with interleaved samples created from a single mono vector of samples
 /// * `from_stereo`: constructs a struct with interleaved samples from 2 mono left and right vectors
 pub trait Samples<T> {
+    /// Returns a vector of doubles of T, (Left, Right)
     fn get_frames(&self) -> Vec<(T, T)>;
 
-    fn from_mono(samples: Vec<T>) -> Self;
+    /// Create a stereo samples struct from mono input sample vector
+    fn from_mono(samples: &[T]) -> Self;
 
-    fn from_stereo(left: Vec<T>, right: Vec<T>) -> Self;
+    /// Create a stereo samples struct from 2 stereo input sample vectors
+    fn from_stereo(left: &[T], right: &[T]) -> Self;
 }
 
 /// A generic helper function to interleave 2 vectors of equal length into a single vector
@@ -29,7 +34,7 @@ pub trait Samples<T> {
 /// # Parameters
 /// * `left`: a vector of T
 /// * `right`: a vector of T
-fn interleave<T: Copy>(left: Vec<T>, right: Vec<T>) -> Vec<T> {
+fn interleave<T: Copy>(left: &[T], right: &[T]) -> Vec<T> {
     assert_eq!(left.len(), right.len());
     let mut output: Vec<T> = Vec::new();
     for index in 0..left.len() {
@@ -92,16 +97,14 @@ impl Samples<i16> for IntSamples {
     }
 
     /// Constructs a stereo sample object by duplicating the mono input and interleaving
-    fn from_mono(samples: Vec<i16>) -> Self {
-        let left = samples.clone();
-        let right = samples.clone();
+    fn from_mono(samples: &[i16]) -> Self {
         Self {
-            samples: interleave(left, right),
+            samples: interleave(samples, samples),
         }
     }
 
     /// Constructs a stereo sample object by interleaving samples
-    fn from_stereo(left: Vec<i16>, right: Vec<i16>) -> Self {
+    fn from_stereo(left: &[i16], right: &[i16]) -> Self {
         Self {
             samples: interleave(left, right),
         }
@@ -122,16 +125,14 @@ impl Samples<f32> for FloatSamples {
     }
 
     /// Constructs a stereo sample object by duplicating the mono input and interleaving
-    fn from_mono(samples: Vec<f32>) -> Self {
-        let left = samples.clone();
-        let right = samples.clone();
+    fn from_mono(samples: &[f32]) -> Self {
         Self {
-            samples: interleave(left, right),
+            samples: interleave(samples, samples),
         }
     }
 
     /// Constructs a stereo sample object by interleaving samples
-    fn from_stereo(left: Vec<f32>, right: Vec<f32>) -> Self {
+    fn from_stereo(left: &[f32], right: &[f32]) -> Self {
         Self {
             samples: interleave(left, right),
         }
@@ -145,19 +146,19 @@ mod tests {
     #[test]
     fn test_int_new() {
         let samples = IntSamples::new(vec![0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
-        assert_eq!(samples.samples, vec![0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
+        assert_eq!(samples.samples, [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
     }
 
     #[test]
     fn test_int_from_mono() {
-        let samples = IntSamples::from_mono(vec![0, 1, 2, 3, 4, 5]);
-        assert_eq!(samples.samples, vec![0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
+        let samples = IntSamples::from_mono(&[0, 1, 2, 3, 4, 5]);
+        assert_eq!(samples.samples, [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
     }
 
     #[test]
     fn test_int_from_stereo() {
-        let samples = IntSamples::from_stereo(vec![0, 1, 2, 3, 4, 5], vec![0, 1, 2, 3, 4, 5]);
-        assert_eq!(samples.samples, vec![0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
+        let samples = IntSamples::from_stereo(&[0, 1, 2, 3, 4, 5], &[0, 1, 2, 3, 4, 5]);
+        assert_eq!(samples.samples, [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
     }
 
     #[test]
@@ -165,7 +166,7 @@ mod tests {
         let samples = IntSamples::new(vec![0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
         assert_eq!(
             samples.get_frames(),
-            vec![(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]
+            [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]
         )
     }
 
@@ -176,28 +177,28 @@ mod tests {
         ]);
         assert_eq!(
             samples.samples,
-            vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0]
+            [0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0]
         )
     }
 
     #[test]
     fn test_float_from_mono() {
-        let samples = FloatSamples::from_mono(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+        let samples = FloatSamples::from_mono(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
         assert_eq!(
             samples.samples,
-            vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0]
+            [0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0]
         )
     }
 
     #[test]
     fn test_float_from_stereo() {
         let samples = FloatSamples::from_stereo(
-            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
-            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
         );
         assert_eq!(
             samples.samples,
-            vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0]
+            [0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0]
         )
     }
 
@@ -208,7 +209,7 @@ mod tests {
         ]);
         assert_eq!(
             samples.get_frames(),
-            vec![
+            [
                 (0.0, 0.0),
                 (1.0, 1.0),
                 (2.0, 2.0),
