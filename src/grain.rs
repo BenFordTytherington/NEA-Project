@@ -27,7 +27,7 @@ use crate::envelope::ADSREnvelope;
 use crate::interpolators::lerp;
 use crate::resample::{semitone_to_hz_ratio, LinearResampler};
 use crate::smoothers::{HannSmoother, Smoother};
-use rand::prelude::{thread_rng, IteratorRandom, Rng, SliceRandom};
+use rand::prelude::{thread_rng, Rng, SliceRandom};
 
 //  * re-pitch
 //     - Resample the audio at the correct rate for pitch shifting and linearly interpolate
@@ -203,7 +203,7 @@ impl Grain {
                 let sample = lerp(
                     self.audio_buffer[index.floor() as usize] as f32,
                     self.audio_buffer[index.floor() as usize + 1] as f32,
-                    index.fract() as f32,
+                    index.fract(),
                 );
 
                 let smooth_value = lerp(
@@ -575,19 +575,27 @@ impl GrainManager {
         (value as f32 * self.env.get_next_sample()) as i16
     }
 
+    /// Triggers the gate of the instances envelope with an on off boolean
     pub fn gate_trigger(&mut self, on_off: bool) {
         self.env.trigger_gate(on_off);
     }
 
+    /// Wrapping setter for the instances envelope method of the same name
     pub fn set_attack(&mut self, attack_time: f32) {
         self.env.set_attack(attack_time)
     }
+
+    /// Wrapping setter for the instances envelope method of the same name
     pub fn set_decay(&mut self, decay_time: f32) {
         self.env.set_decay(decay_time)
     }
+
+    /// Wrapping setter for the instances envelope method of the same name
     pub fn set_sustain(&mut self, sustain_level: f32) {
         self.env.set_sustain(sustain_level)
     }
+
+    /// Wrapping setter for the instances envelope method of the same name
     pub fn set_release(&mut self, release_time: f32) {
         self.env.set_release(release_time)
     }

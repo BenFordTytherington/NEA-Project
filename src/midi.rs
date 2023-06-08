@@ -1,50 +1,67 @@
+//! Module which mocks MIDI messages in a very simple sense, optimized to have predetermined timing
+//! Contains a struct for mock midi messages, called NoteMessage. This only allows for Midi Note messages, with no note off message, and predetermined timing.
+//! This struct interfaces with the interpolator method of repitching.
+
 use crate::resample::semitone_to_hz_ratio;
 
-/// Receive mock midi message (not NIH plug format) and for that message, get variety of things:
-///     - get frequency in hz
-///     - get frequency ratio relative to middle c, which is used for reptiching
-///     - set a gate signal
-/// Store a queue of midi messages
-/// Implement a sequencer.
-
+/// Note message which contains an optional midi note number and duration in seconds
+///
+/// The note being `None` can be interpreted as the note being gate off, which is used for the gate behaviour of various objects
+///
+/// The time is used by the midi manager to determine when to load the next note, in a sort of sequence behaviour
 pub struct NoteMessage {
     note: Option<u8>,
     time_s: f32,
 }
 
 impl NoteMessage {
+    /// Function using pattern matching on string, to determine if it is a valid musical note
+    /// ## Examples:
+    /// 'C5' True
+    /// 'H2' False
+    /// 'Db6' True
+    /// 'E#4' True (evaluates to F4)
+    /// 'C' False (an octave needs to be specified)
     pub fn valid_name(name: &str) -> bool {
+        // A note name will never be more than 3 characters: Note, Accidental?, Octave
         match name.len() {
             i if i <= 3 => (),
             _ => return false,
         };
-        match name.chars().nth(0) {
+        // Matching the first character
+        match name.chars().next() {
             Some(a) => match a {
+                // The letter name must be a letter between a and g, and is case insensitive
                 'A'..='G' | 'a'..='g' => (),
                 _ => return false,
             },
             None => return false,
         };
-        match name.chars().nth(1) {
+        // Matching the second character
+        match name.chars().next() {
             Some(a) => match a {
+                // Second may be an accidental
                 '#' | 'b' => (),
+                // Or an octave
                 '0'..='8' => (),
                 _ => return false,
             },
             None => return false,
         };
-        match name.chars().nth(2) {
-            Some(a) => match a {
+        // Match the last character if it exists
+        if let Some(a) = name.chars().next() {
+            match a {
                 '0'..='8' => (),
                 _ => return false,
-            },
-            None => (),
+            }
         };
+        // if all previous checks pass, name is valid
         true
     }
 
+    /// Converts a musical note name to a midi note value
     pub fn midi_note_from_name(name: &str) -> u8 {
-        let notes = if !Self::valid_name(name) {
+        if !Self::valid_name(name) {
             panic!("Invalid note name")
         };
         // gets the last character of name, then converts to digit base 10, and multiplies by 12 (octave in semitones)
@@ -55,6 +72,8 @@ impl NoteMessage {
             .to_digit(10)
             .unwrap()
             * 12) as u8;
+        // Converts the note name to an offset from 0, where A is 0. This is where MIDI starts (A0)
+        // Also allows for matching accidentals as the same note such as E# and F or Db and C#
         let note = match &name[..name.len() - 1] {
             "A" => 0_i8,
             "A#" | "Bb" => 1,
@@ -68,11 +87,14 @@ impl NoteMessage {
             "F#" | "Gb" => -3,
             "G" => -2,
             "G#" | "Ab" => -1,
+            // This should be unreachable
             _ => panic!("Invalid note name"),
         };
+        // 21 is the first MIDI note message, as lower than this is used for control values
         (note + (21 + octave) as i8) as u8
     }
 
+    /// The constructor for a midi note given a valid note name and the duration in seconds
     pub fn new(name: &str, time: f32) -> Self {
         Self {
             note: Some(Self::midi_note_from_name(name)),
@@ -80,29 +102,31 @@ impl NoteMessage {
         }
     }
 
+    /// Getter for the current timing of a NoteMessage
     pub fn get_time(&self) -> f32 {
         self.time_s
     }
 
+    /// Get the midi note value or 0
     pub fn get_note(&self) -> u8 {
-        match self.note {
-            Some(note) => note,
-            None => 0,
-        }
+        self.note.unwrap_or(0)
     }
 
+    /// Reusable constant instance with no note, to save time in removing Note to a gateless value
     const NONE: Self = Self {
         note: None,
         time_s: 0.0,
     };
 }
 
+/// Struct which manages midi notes and can output a frequency ratio for repitching.
 pub struct MidiManager {
     current_event: NoteMessage,
     current_timer: f32,
 }
 
 impl MidiManager {
+    /// Constructor with a default value of no midi message
     pub fn new() -> Self {
         Self {
             current_event: NoteMessage::NONE,
@@ -110,11 +134,13 @@ impl MidiManager {
         }
     }
 
+    /// Set the current note event given an instance of NoteMessage
     pub fn set_note_event(&mut self, event: NoteMessage) {
         self.current_timer = event.get_time();
         self.current_event = event;
     }
 
+    /// Decrease the timer, used for gate signals, uses 44100Hz sample rate.
     pub fn tick(&mut self) {
         self.current_timer -= 1.0 / 44100.0;
         if self.current_timer < 0.0 {
@@ -122,24 +148,24 @@ impl MidiManager {
         }
     }
 
+    /// Returns a boolean based on whether the note is a valid note or 0, which indicates an empty event
     pub fn get_gate(&self) -> bool {
-        match self.current_event.get_note() {
-            0 => false,
-            _ => true,
-        }
+        !matches!(self.current_event.get_note(), 0)
     }
 
+    /// Get the ratio between the current note and middle C (C5), assume the original pitch of your sample is this.
     pub fn get_ratio(&self) -> f32 {
         let note = self.current_event.get_note() as i8;
         // 72 is the midi number of C5 - middle C
-        let semitones = -1 * (72 - note);
+        let semitones = -(72 - note);
         semitone_to_hz_ratio(semitones)
     }
 
+    /// Get the number of semitones from middle C
     pub fn get_semitones(&self) -> i8 {
         let note = self.current_event.get_note() as i8;
         // 72 is the midi number of C5 - middle C
-        -1 * (72 - note)
+        -(72 - note)
     }
 }
 

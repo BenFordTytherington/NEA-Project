@@ -1,11 +1,17 @@
+//! Module containing a struct that performs saturation on a given input, with a threshold level and mixes the output
 use std::ops::Neg;
 
+/// A struct which stores 2 fields and uses them to saturate (clip) an input
+/// ## Attributes:
+/// * `threshold`: The amplitude (f32) at which signals will be clipped
+/// * `mix_ratio`: Ratio between 1 and 0 of how much saturated signal is mixed in (1 is full clipping and 0 is dry)
 pub struct Saturator {
     threshold: f32,
     mix_ratio: f32,
 }
 
 impl Saturator {
+    /// Constructor given a mix ratio and threshold
     pub fn new(threshold: f32, mix_ratio: f32) -> Self {
         Self {
             threshold,
@@ -13,13 +19,17 @@ impl Saturator {
         }
     }
 
+    /// Setter for saturator ...
     pub fn set_threshold(&mut self, threshold: f32) {
         self.threshold = threshold;
     }
+
+    /// Setter for saturator ...mix ratio (must be between 0 and 1
     pub fn set_mix_ratio(&mut self, mix_ratio: f32) {
-        self.mix_ratio = mix_ratio;
+        self.mix_ratio = mix_ratio.clamp(0.0, 1.0);
     }
 
+    /// Takes an f32 input using saturation
     pub fn process(&self, xn: f32) -> f32 {
         let value = match xn {
             xn if xn > self.threshold => self.threshold,

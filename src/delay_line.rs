@@ -210,10 +210,12 @@ impl StereoDelay {
         self.right_dl.delay_samples = (self.sample_rate * time_s) as usize
     }
 
+    /// Sets the saturation factor as a fraction of the sample maximum (i16::MAX)
     pub fn set_saturation_factor(&mut self, factor: f32) {
         self.saturator.set_threshold(i16::MAX as f32 / factor);
     }
 
+    /// Getter for the delay times as a pair, to avoid repeating the get time function for both delay lines
     pub fn get_times(&self) -> (f32, f32) {
         (
             self.left_dl.get_delay_seconds(),

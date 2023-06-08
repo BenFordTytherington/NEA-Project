@@ -1,7 +1,11 @@
+//! Module containing a modulation system
+//! Contains traits for a modulable and a modulator
+//! Contains a struct for a generic numeric parameter and for a boolean parameter
+//! Contains a manager which controls modulation pairs by a string ID
+#![allow(dead_code)]
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ops::Add;
-use std::process::Output;
 use std::rc::Rc;
 
 /// A trait defining behaviour for a parameter which can be modulated;
@@ -194,12 +198,12 @@ impl ModManager {
             src: Rc::clone(
                 self.modulator_map
                     .get(src)
-                    .expect(format!("Modulation source: {} does not exist", src).as_str()),
+                    .unwrap_or_else(|| panic!("Modulation source '{}' does not exist", src)),
             ),
             dst: Rc::clone(
                 self.parameter_map
                     .get(dst)
-                    .expect(format!("Modulation destination: {} does not exist", dst).as_str()),
+                    .unwrap_or_else(|| panic!("Modulation destination '{}' does not exist", dst)),
             ),
             depth,
         })
@@ -208,7 +212,7 @@ impl ModManager {
     /// Register modulable parameters from a parameter manager struct, by cloning their values into this objects hashmap
     pub fn register_from_parameters(&mut self, parameters: &ParameterManager) {
         for (name, rc) in parameters.get_map().iter() {
-            self.parameter_map.insert(name.clone(), Rc::clone(&rc));
+            self.parameter_map.insert(name.clone(), Rc::clone(rc));
         }
     }
 
@@ -345,28 +349,27 @@ impl Modulator for Incrementer {
 
 #[cfg(test)]
 mod tests {
-    use crate::delay_line::{DelayLine, StereoDelay};
+    use crate::delay_line::StereoDelay;
     use crate::lfo::{LFOMode, MMLFO};
     use crate::modulation::{
-        BoolParameter, Incrementer, ModManager, Modulator, NumericParameter, ParameterContainer,
+        BoolParameter, Incrementer, ModManager, NumericParameter, ParameterContainer,
         ParameterManager,
     };
     use crate::samples::{IntSamples, PhonicMode, Samples};
     use crate::{load_wav, write_wav};
     use std::cell::Cell;
-    use std::collections::HashMap;
 
     #[test]
     fn test_modulation_creation() {
         let mut manager = ModManager::new();
-        let mut params = ParameterContainer {
+        let params = ParameterContainer {
             field1: 1.0,
             field2: 64,
             field3: false,
         };
         let modulator1 = Incrementer { increment: 0.1 };
         let modulator2 = Incrementer { increment: 2.0 };
-        let mut field1_parameter = NumericParameter::<f32> {
+        let field1_parameter = NumericParameter::<f32> {
             value: 0.0,
             base: 1.0,
             lower: 0.0,
@@ -381,7 +384,7 @@ mod tests {
         //     param_ref: &mut params.field2,
         //     depth: 64.0,
         // };
-        let mut field3_parameter = BoolParameter {
+        let field3_parameter = BoolParameter {
             value: false,
             param_ref: Cell::new(params.field3),
         };
@@ -414,19 +417,19 @@ mod tests {
     fn test_parameter_registry() {
         let mut manager = ModManager::new();
         let mut parameter_manager = ParameterManager::new();
-        let mut params = ParameterContainer {
+        let params = ParameterContainer {
             field1: 35.0,
             field2: 186,
             field3: true,
         };
-        let mut field1_parameter = NumericParameter::<f32> {
+        let field1_parameter = NumericParameter::<f32> {
             value: 0.0,
             base: 35.0,
             lower: 0.0,
             upper: 70.0,
             param_ref: Cell::new(params.field1),
         };
-        let mut field3_parameter = BoolParameter {
+        let field3_parameter = BoolParameter {
             value: true,
             param_ref: Cell::new(params.field3),
         };
@@ -460,14 +463,14 @@ mod tests {
         let mut lfo = MMLFO::new(false, LFOMode::Sine);
         lfo.set_frequency_hz(0.25);
 
-        let mut delay_seconds_l_p = NumericParameter {
+        let delay_seconds_l_p = NumericParameter {
             value: 0.0_f32,
             base: 0.002,
             upper: 0.0035,
             lower: 0.0005,
             param_ref: Cell::new(0.002),
         };
-        let mut delay_seconds_r_p = NumericParameter {
+        let delay_seconds_r_p = NumericParameter {
             value: 0.0_f32,
             base: 0.0025,
             upper: 0.0040,

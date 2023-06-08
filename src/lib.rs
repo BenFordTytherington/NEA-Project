@@ -306,8 +306,8 @@ mod tests {
     use crate::multi_channel::MultiDelayLine;
     use crate::samples::{IntSamples, PhonicMode, Samples};
     use crate::timing::{NoteModifier, TimeDiv, Timing};
-    use crate::{distribute_exponential, load_wav, write_wav};
-    use ndarray::{arr1, Array1};
+    use crate::{load_wav, write_wav};
+    use ndarray::Array1;
     use test_case::test_case;
 
     // Reverb Algorithm
@@ -409,6 +409,7 @@ mod tests {
 
     #[test]
     #[ignore]
+    // Utility rather than an actual test
     fn strip_start() {
         let in_samples = load_wav("tests/sine.wav").unwrap();
         let mut out: Vec<i16> = Vec::new();
@@ -425,64 +426,7 @@ mod tests {
                 out.push(sample);
             }
         }
-        let stereo_samples = IntSamples::from_mono(&out);
+        let _stereo_samples = IntSamples::from_mono(&out);
         write_wav("tests/sine.wav", out, PhonicMode::Mono);
     }
-
-    #[test]
-    #[ignore]
-    fn test_all_examples() {
-        let mut in_samples_1: Vec<i16> = load_wav("tests/pulse.wav").unwrap();
-        in_samples_1.extend(&[0; (44100 * 4)]);
-
-        // single delay
-        let mut single_delay_1 = StereoDelay::new(44100.0, 0.08, 0.08, 0.85, 0.85);
-        let mut out_1: Vec<i16> = Vec::new();
-
-        for sample in in_samples_1.clone() {
-            out_1.push(
-                single_delay_1
-                    .process(sample as f32, sample as f32, false, false)
-                    .0 as i16,
-            );
-        }
-
-        let single_delayed_samples_1 = IntSamples::from_mono(&out_1);
-
-        write_wav(
-            "tests/debug/single_delayed_pulse.wav",
-            single_delayed_samples_1.samples(),
-            PhonicMode::Stereo,
-        );
-        // multi delay
-        let times_s: Vec<f32> = distribute_exponential(8, 0.15);
-
-        let mut multi_delay_1 = MultiDelayLine::new(times_s, 0.85, 0.85, 8, 44100);
-
-        out_1.clear();
-
-        for sample in in_samples_1.clone() {
-            let sample_array = arr1(&[sample as f32; 8]);
-            let sum = multi_delay_1
-                .process_with_feedback(sample_array, false)
-                .sum();
-            out_1.push((sum / 4.0) as i16);
-        }
-
-        let multi_delayed_samples_1 = IntSamples::from_mono(&out_1);
-
-        write_wav(
-            "tests/debug/multi_delayed_pulse.wav",
-            multi_delayed_samples_1.samples(),
-            PhonicMode::Stereo,
-        );
-
-        // mixed multi
-        // 1 diffusion
-        // series all passes
-        // multi diffusion
-        // final
-    }
-
-    // GUI
 }

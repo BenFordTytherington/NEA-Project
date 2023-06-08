@@ -66,18 +66,25 @@ impl ADSREnvelope {
         }
     }
 
+    /// Setter for the envelopes attack, sets in seconds
     pub fn set_attack(&mut self, attack_time: f32) {
         self.attack_time = attack_time;
         self.setup();
     }
+
+    /// Setter for the envelopes decay, sets in seconds
     pub fn set_decay(&mut self, decay_time: f32) {
         self.decay_time = decay_time;
         self.setup();
     }
+
+    /// Setter for the envelopes sustain, sets value between 0 and 1
     pub fn set_sustain(&mut self, sustain_level: f32) {
         self.sustain_level = sustain_level;
         self.setup();
     }
+
+    /// Setter for the envelopes release, sets in seconds
     pub fn set_release(&mut self, release_time: f32) {
         self.release_time = release_time;
         self.setup();

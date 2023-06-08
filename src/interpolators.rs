@@ -28,6 +28,8 @@ pub fn lanczos_window(x: f32, a: f32) -> f32 {
     }
 }
 
+// The hermite basis functions
+
 #[allow(missing_docs)]
 fn h00(t: f32) -> f32 {
     (1.0 + 2.0 * t) * (1.0 - t).powi(2)
@@ -48,6 +50,7 @@ fn h11(t: f32) -> f32 {
     t.powi(2) * (t - 1.0)
 }
 
+/// Function which interpolates a value between the points p0 through p2, given a stretch factor and a t interpolant
 pub fn hermite_interpolate(p0: f32, p1: f32, p2: f32, p3: f32, factor: f32, t: f32) -> f32 {
     // the gradient between the points 1 after and 1 before the sample with respect to time
     let m1 = (p2 - p0) * 0.5 * factor;

@@ -1,6 +1,5 @@
 //! A Module containing structs and functions for resampling audio
 //! Primarily used for pitch shifting.
-
 use crate::interpolators::{hermite_interpolate, lanczos_window, lerp};
 
 /// Struct performing linear interpolation given an input slice and pitch factor to resample by.
@@ -47,6 +46,7 @@ impl<'a> LinearResampler<'a> {
         false
     }
 
+    /// Get the resampling pitch factor as a multiple of the initial frequency
     pub fn get_pitch_freq(&self) -> f64 {
         self.pitch_factor
     }
@@ -239,15 +239,14 @@ pub fn semitone_to_hz_ratio(step: i8) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::resample::{
-        semitone_to_hz_ratio, HermiteResampler, LanczosResampler, LinearResampler,
-    };
+    use crate::resample::{semitone_to_hz_ratio, LanczosResampler, LinearResampler};
     use crate::samples::PhonicMode;
     use crate::{load_wav, write_wav};
     use plotters::prelude::*;
+    use rustfft::num_complex::Complex;
+    #[allow(unused_imports)]
     use rustfft::num_traits::Signed;
-    use rustfft::{num_complex::Complex, FftPlanner};
-    use std::ops::Neg;
+    use rustfft::FftPlanner;
     use test_case::test_case;
 
     #[test]
@@ -257,7 +256,6 @@ mod tests {
         let mut root = LinearResampler::new(&samples, 1.0);
         let mut third = LinearResampler::new(&samples, 5.0 / 4.0);
         let mut fifth = LinearResampler::new(&samples, 3.0 / 2.0);
-        let mut sub_oct = LinearResampler::new(&samples, 0.25);
 
         let mut out: Vec<i16> = Vec::new();
 
@@ -273,21 +271,21 @@ mod tests {
         write_wav("tests/debug/sine_harmony_linear.wav", out, PhonicMode::Mono);
     }
 
+    fn vector_diff(a: &Vec<i16>, b: &Vec<i16>) -> Vec<i32> {
+        (0..a.min(b).len())
+            .map(|index| (a[index] - b[index]).abs() as i32)
+            .collect()
+    }
+
     #[test]
     fn find_difference() {
         let first = load_wav("tests/debug/kalimba_minus_two_octave_linear.wav").unwrap();
         let second = load_wav("tests/debug/kalimba_minus_two_octave_hermite.wav").unwrap();
         let third = load_wav("tests/debug/kalimba_minus_two_octave_lanczos.wav").unwrap();
 
-        let first_second_diff: Vec<i32> = (0..first.len())
-            .map(|index| (first[index] - second[index]).abs() as i32)
-            .collect();
-        let first_third_diff: Vec<i32> = (0..first.len())
-            .map(|index| (first[index] - third[index]).abs() as i32)
-            .collect();
-        let second_third_diff: Vec<i32> = (0..second.len())
-            .map(|index| (second[index] - third[index]).abs() as i32)
-            .collect();
+        let first_second_diff: Vec<i32> = vector_diff(&first, &second);
+        let first_third_diff: Vec<i32> = vector_diff(&first, &third);
+        let second_third_diff: Vec<i32> = vector_diff(&second, &third);
 
         let diff_sum_1 = first_second_diff.iter().sum::<i32>();
         let diff_sum_2 = first_third_diff.iter().sum::<i32>();
@@ -319,7 +317,7 @@ mod tests {
     fn test_lanczos(window_size: u16) {
         let samples: Vec<i16> = load_wav("tests/kalimba.wav").unwrap();
 
-        let mut resampler = LanczosResampler::new(&samples, 0.25, window_size);
+        let resampler = LanczosResampler::new(&samples, 0.25, window_size);
         let output: Vec<i16> = resampler.map(|sample| sample as i16).collect();
         write_wav(
             format!("tests/debug/lanczos_quarter_window_{}.wav", window_size).as_str(),
@@ -382,26 +380,26 @@ mod tests {
 
         let mut out: Vec<i16> = Vec::new();
 
-        for shift in 1..=12 as i8 {
+        for shift in 1..=12 {
             let freq_shift = semitone_to_hz_ratio(shift) as f64;
 
-            let mut resampler = LinearResampler::new(&input, freq_shift);
+            let resampler = LinearResampler::new(&input, freq_shift);
             let pitched: Vec<i16> = resampler.take(22050).map(|sample| sample as i16).collect();
             out.extend(pitched)
         }
 
-        for shift in 1..=12 as i8 {
+        for shift in 1..=12 {
             let freq_shift = semitone_to_hz_ratio(13 - shift) as f64;
 
-            let mut resampler = LinearResampler::new(&input, freq_shift);
+            let resampler = LinearResampler::new(&input, freq_shift);
             let pitched: Vec<i16> = resampler.take(22050).map(|sample| sample as i16).collect();
             out.extend(pitched)
         }
 
-        for shift in 1..=12 as i8 {
-            let freq_shift = semitone_to_hz_ratio(shift.neg()) as f64;
+        for shift in 1..=12 {
+            let freq_shift = semitone_to_hz_ratio(-shift) as f64;
 
-            let mut resampler = LinearResampler::new(&input, freq_shift);
+            let resampler = LinearResampler::new(&input, freq_shift);
             let pitched: Vec<i16> = resampler.take(22050).map(|sample| sample as i16).collect();
             out.extend(pitched)
         }
