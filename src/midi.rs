@@ -1,5 +1,6 @@
 //! Module which mocks MIDI messages in a very simple sense, optimized to have predetermined timing
-//! Contains a struct for mock midi messages, called NoteMessage. This only allows for Midi Note messages, with no note off message, and predetermined timing.
+//! Contains a struct for mock midi messages, called NoteMessage.
+//! This only allows for Midi Note messages, with no note off message, and predetermined timing.
 //! This struct interfaces with the interpolator method of repitching.
 
 use crate::resample::semitone_to_hz_ratio;

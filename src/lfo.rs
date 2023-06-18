@@ -90,7 +90,7 @@ impl Default for MMLFO {
 }
 
 impl Modulator for MMLFO {
-    fn get_value(&mut self) -> f32 {
+    fn get_value(&self) -> f32 {
         self.discrete_func[self.current_index] - 0.5
     }
 

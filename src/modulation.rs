@@ -28,7 +28,7 @@ pub trait Modulable {
 /// A trait defining behaviour for a modulator object, which has a getter for its current value, and a reset function to reset the modulation.
 pub trait Modulator {
     /// Get the value for the current timestamp, should not change the value by itself
-    fn get_value(&mut self) -> f32;
+    fn get_value(&self) -> f32;
     /// Set the structs value to its next value, called after all the accessors of this object have called get_value
     fn advance(&mut self);
     /// Reset the modulation signal, examples: restarting an lfo, re-triggering an envelope, resampling s&h, etc...
@@ -340,7 +340,7 @@ struct Incrementer {
     increment: f32,
 }
 impl Modulator for Incrementer {
-    fn get_value(&mut self) -> f32 {
+    fn get_value(&self) -> f32 {
         self.increment
     }
     fn advance(&mut self) {}
@@ -376,14 +376,6 @@ mod tests {
             upper: 2.0,
             param_ref: Cell::new(params.field1),
         };
-        // let mut field2_parameter = NumericParameter::<i16> {
-        //     value: 64,
-        //     base: 64.0,
-        //     lower: 0,
-        //     upper: 128,
-        //     param_ref: &mut params.field2,
-        //     depth: 64.0,
-        // };
         let field3_parameter = BoolParameter {
             value: false,
             param_ref: Cell::new(params.field3),
