@@ -122,7 +122,7 @@ impl StereoDelay {
         feedback: f32,
         mix: f32,
     ) -> Self {
-        let max_delay_samples = sample_rate as usize + 1;
+        let max_delay_samples = 530_000;
 
         // conversion between seconds and samples using provided sample rate
         let delay_samples_l = (sample_rate as f64 * delay_seconds_l) as usize;
@@ -157,7 +157,7 @@ impl StereoDelay {
         feedback: f32,
         mix: f32,
     ) -> Self {
-        let max_delay_samples = sample_rate as usize + 1;
+        let max_delay_samples = 530_000; // allows for slowest possible time division at 30BPM
 
         let delay_seconds_l = timing_left.to_seconds();
         let delay_seconds_r = timing_right.to_seconds();
@@ -184,20 +184,19 @@ impl StereoDelay {
         do_filtering: bool,
         saturate: bool,
     ) -> (f32, f32) {
-        let (out_left, _) = self
-            .left_dl
-            .process_with_feedback(in_sample_l, do_filtering);
-
-        let (out_right, _) = self
-            .right_dl
-            .process_with_feedback(in_sample_r, do_filtering);
-        match saturate {
-            false => (out_left, out_right),
+        let (l_in, r_in) = match saturate {
             true => (
-                self.saturator.process(out_left),
-                self.saturator.process(out_right),
+                self.saturator.process(in_sample_l),
+                self.saturator.process(in_sample_r),
             ),
-        }
+            false => (in_sample_l, in_sample_r),
+        };
+
+        let (out_left, _) = self.left_dl.process_with_feedback(l_in, do_filtering);
+
+        let (out_right, _) = self.right_dl.process_with_feedback(r_in, do_filtering);
+
+        (out_left, out_right)
     }
 
     /// Setter for left delay line time in seconds
@@ -212,7 +211,29 @@ impl StereoDelay {
 
     /// Sets the saturation factor as a fraction of the sample maximum (i16::MAX)
     pub fn set_saturation_factor(&mut self, factor: f32) {
-        self.saturator.set_threshold(i16::MAX as f32 / factor);
+        self.saturator
+            .set_threshold(i16::MAX as f32 / (2.0 * factor));
+    }
+
+    pub fn set_saturation_mix(&mut self, mix: f32) {
+        self.saturator.set_mix_ratio(mix.clamp(0.0, 1.0));
+    }
+
+    pub fn set_filter_cutoff(&mut self, cutoff_freq: f32) {
+        self.left_dl.filter.set_cutoff(cutoff_freq, 44100.0);
+        self.right_dl.filter.set_cutoff(cutoff_freq, 44100.0);
+    }
+
+    pub fn set_mix(&mut self, mix: f32) {
+        let clamped = mix.clamp(0.0, 1.0);
+        self.left_dl.set_mix_ratio(clamped);
+        self.right_dl.set_mix_ratio(clamped);
+    }
+
+    pub fn set_feedback(&mut self, feedback: f32) {
+        let clamped = feedback.clamp(0.0, 1.0);
+        self.left_dl.set_internal_feedback(clamped);
+        self.right_dl.set_internal_feedback(clamped);
     }
 
     /// Getter for the delay times as a pair, to avoid repeating the get time function for both delay lines

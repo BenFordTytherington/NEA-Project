@@ -217,7 +217,6 @@ mod tests {
             if midi_manager.get_gate() {
                 out.push(resampler.next().unwrap() as i16);
             } else {
-                println!("Setting note event to {}", events[0].get_note());
                 midi_manager.set_note_event(match events.pop_front() {
                     Some(event) => event,
                     None => NoteMessage::NONE,

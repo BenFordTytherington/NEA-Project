@@ -1,19 +1,26 @@
 //! A module containing useful structs and functions for time based conversions
 //! Contains functions / structs used to convert between seconds, samples and tempo based time.
 
+use nih_plug::prelude::Enum;
+
 /// An enum used for time divisions relative to a bar.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Enum, PartialEq)]
 pub enum TimeDiv {
     /// A bar
+    #[id = "Whole"]
     Whole,
     /// Half a bar
+    #[id = "Half"]
     Half,
     #[default]
     /// A quarter of a bar ( A beat )
+    #[id = "Quarter"]
     Quarter,
     /// An eight of a bar ( A half note )
+    #[id = "Eighth"]
     Eighth,
     /// A sixteenth of a bar ( Quarter note )
+    #[id = "Sixteenth"]
     Sixteenth,
 }
 
@@ -21,14 +28,17 @@ pub enum TimeDiv {
 ///
 /// Non exhaustive because an option for generic tuplets may be added.
 #[non_exhaustive]
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Enum, PartialEq)]
 pub enum NoteModifier {
     #[default]
     /// A normal note (1 X normal length)
+    #[id = "Regular"]
     Regular,
     /// A dotted note (1.5 X normal length)
+    #[id = "Dotted"]
     Dotted,
     /// A triplet (0.666 X normal length)
+    #[id = "Triplet"]
     Triplet,
 }
 
@@ -145,5 +155,13 @@ mod tests {
             let diff = (correct_times[index] - calc_times[index]).abs();
             assert!(diff <= 0.001)
         }
+    }
+
+    #[test]
+    fn max_time() {
+        println!(
+            "{}",
+            Timing::new(TimeDiv::Whole, 30, NoteModifier::Dotted).to_samples(44100.0)
+        )
     }
 }

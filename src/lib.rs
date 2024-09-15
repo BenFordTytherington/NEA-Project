@@ -5,8 +5,6 @@
 //! write_wav() and its float counterpart write samples to a .wav file.
 #![warn(missing_docs)]
 
-extern crate core;
-
 pub mod delay_buffer;
 pub mod delay_line;
 pub mod diffusion;
@@ -29,6 +27,8 @@ use samples::PhonicMode;
 use std::num::NonZeroU32;
 
 use crate::delay_line::StereoDelay;
+use crate::timing::{NoteModifier, TimeDiv, Timing};
+use hound::SampleFormat::Int;
 use hound::{Error, SampleFormat, WavReader, WavSpec, WavWriter};
 use nih_plug::prelude::*;
 use std::sync::Arc;
@@ -45,12 +45,53 @@ struct GranularPlugin {
 /// The parameters for the main plugin, returned in an Arc type.
 #[derive(Params)]
 struct GranularPluginParams {
-    /// The parameter's ID is used to identify the parameter in the wrappred plugin API. As long as
-    /// these IDs remain constant, you can rename and reorder these fields as you wish. The
-    /// parameters are exposed to the host in the same order they were defined. In this case, this
-    /// gain parameter is stored as linear gain while the values are displayed in decibels.
-    #[id = "gain"]
+    #[id = "Gain"]
     pub gain: FloatParam,
+
+    #[id = "Sync"]
+    pub sync_time: BoolParam,
+
+    #[id = "Left-Time"]
+    pub left_time_ms: IntParam,
+
+    #[id = "Right-Time"]
+    pub right_time_ms: IntParam,
+
+    #[id = "Left-Time-Division"]
+    pub left_time_div: EnumParam<TimeDiv>,
+
+    #[id = "Right-Time-Division"]
+    pub right_time_div: EnumParam<TimeDiv>,
+
+    #[id = "BPM"]
+    pub bpm: IntParam,
+
+    #[id = "Left-Note-Type"]
+    pub left_note_type: EnumParam<NoteModifier>,
+
+    #[id = "Right-Note-Type"]
+    pub right_note_type: EnumParam<NoteModifier>,
+
+    #[id = "Feedback"]
+    pub feedback: FloatParam,
+
+    #[id = "Mix"]
+    pub mix: FloatParam,
+
+    #[id = "Saturate"]
+    pub saturate: BoolParam,
+
+    #[id = "Filter"]
+    pub filter: BoolParam,
+
+    #[id = "Cutoff"]
+    pub cutoff: FloatParam,
+
+    #[id = "Saturate-Factor"]
+    pub saturate_factor: IntParam,
+
+    #[id = "Saturate-Mix"]
+    pub saturate_mix: FloatParam,
 }
 
 impl Default for GranularPlugin {
@@ -88,12 +129,89 @@ impl Default for GranularPluginParams {
             // `.with_step_size(0.1)` function to get internal rounding.
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+
+            sync_time: BoolParam::new("Sync", false),
+
+            left_time_ms: IntParam::new("Left Time", 200, IntRange::Linear { min: 1, max: 10000 })
+                .with_unit(" ms")
+                .with_smoother(SmoothingStyle::Linear(50.0)),
+
+            right_time_ms: IntParam::new(
+                "Right Time",
+                200,
+                IntRange::Linear { min: 1, max: 10000 },
+            )
+            .with_unit(" ms")
+            .with_smoother(SmoothingStyle::Linear(50.0)),
+
+            left_time_div: EnumParam::new("Left Division", TimeDiv::Quarter),
+
+            right_time_div: EnumParam::new("Right Division", TimeDiv::Quarter),
+
+            bpm: IntParam::new("BPM", 100, IntRange::Linear { min: 30, max: 200 }),
+
+            left_note_type: EnumParam::new("Left Note Type", NoteModifier::Regular),
+
+            right_note_type: EnumParam::new("Right Note Type", NoteModifier::Dotted),
+
+            feedback: FloatParam::new("Feedback", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_smoother(SmoothingStyle::Linear(50.0))
+                .with_value_to_string(formatters::v2s_f32_percentage(3))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
+
+            mix: FloatParam::new("Mix", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_smoother(SmoothingStyle::Linear(50.0))
+                .with_value_to_string(formatters::v2s_f32_percentage(3))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
+
+            saturate: BoolParam::new("Saturate", false),
+            filter: BoolParam::new("Filter", false),
+
+            cutoff: FloatParam::new(
+                "Colour",
+                5000.0,
+                FloatRange::Linear {
+                    min: 20.0,
+                    max: 5000.0,
+                },
+            )
+            .with_unit(" Hz")
+            .with_smoother(SmoothingStyle::Logarithmic(50.0)),
+            saturate_factor: IntParam::new("Dirt", 2, IntRange::Linear { min: 1, max: 32 }),
+            saturate_mix: FloatParam::new("Crunch", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 }),
+        }
+    }
+}
+
+impl GranularPlugin {
+    fn update_time(&mut self) {
+        match self.params.sync_time.value() {
+            true => {
+                let new_timing_left = Timing::new(
+                    self.params.left_time_div.value(),
+                    self.params.bpm.value() as i16,
+                    self.params.left_note_type.value(),
+                );
+                let new_timing_right = Timing::new(
+                    self.params.right_time_div.value(),
+                    self.params.bpm.value() as i16,
+                    self.params.right_note_type.value(),
+                );
+                self.delay.set_time_left(new_timing_left.to_seconds());
+                self.delay.set_time_right(new_timing_right.to_seconds());
+            }
+            false => {
+                self.delay
+                    .set_time_left(self.params.left_time_ms.value() as f32 / 1000.0);
+                self.delay
+                    .set_time_right(self.params.right_time_ms.value() as f32 / 1000.0);
+            }
         }
     }
 }
 
 impl Plugin for GranularPlugin {
-    const NAME: &'static str = "Granular Plugin";
+    const NAME: &'static str = "Stereo Delay";
     const VENDOR: &'static str = "Ben Ford";
     const URL: &'static str = env!("CARGO_PKG_HOMEPAGE");
     const EMAIL: &'static str = "17bford@tythy.school";
@@ -148,13 +266,28 @@ impl Plugin for GranularPlugin {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Mix and Feedback:
+        self.delay.set_mix(self.params.mix.value());
+        self.delay.set_feedback(self.params.feedback.value());
+        // Saturate and Filter:
+        self.delay.set_filter_cutoff(self.params.cutoff.value());
+        self.delay
+            .set_saturation_factor(self.params.saturate_factor.value() as f32);
+        self.delay
+            .set_saturation_mix(self.params.saturate_mix.value());
+
         for mut channel_samples in buffer.iter_samples() {
             let left = *channel_samples.get_mut(0).unwrap();
             let right = *channel_samples.get_mut(1).unwrap();
 
-            let (processed_l, processed_r) = self.delay.process(left, right, true, true);
-            *channel_samples.get_mut(0).unwrap() = processed_l;
-            *channel_samples.get_mut(1).unwrap() = processed_r;
+            let (processed_l, processed_r) = self.delay.process(
+                left,
+                right,
+                self.params.filter.value(),
+                self.params.saturate.value(),
+            );
+            *channel_samples.get_mut(0).unwrap() = processed_l * self.params.gain.value();
+            *channel_samples.get_mut(1).unwrap() = processed_r * self.params.gain.value();
         }
         ProcessStatus::Normal
     }

@@ -29,7 +29,7 @@ fast-math = "0.1.1"
 
 [dev-dependencies]
 simple_logger = "4.0.0"
-criterion = "0.4.0"
+criterion = "0.5.1"
 test-case = "3.0.0"
 rustfft = "6.1.0"
 plotters = "0.3.4"
