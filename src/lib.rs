@@ -1,25 +1,104 @@
-use hound;
+//! A crate containing the main code for the plugin and some helper functions.
+//! GranularPlugin is the main plugin, using the NIH-plug framework to build to the VST3 and CLAP formats.
+//! stat() is used for integration tests.
+//! load_wav() and its float counterpart load samples from a .wav file.
+//! write_wav() and its float counterpart write samples to a .wav file.
+#![warn(missing_docs)]
+
+pub mod delay_buffer;
+pub mod delay_line;
+pub mod diffusion;
+pub mod envelope;
+pub mod filter;
+pub mod grain;
+pub mod interpolators;
+pub mod lfo;
+pub mod midi;
+pub mod modulation;
+pub mod multi_channel;
+pub mod resample;
+pub mod reverb;
+pub mod samples;
+pub mod saturation;
+pub mod smoothers;
+pub mod timing;
+
+use samples::PhonicMode;
+use std::num::NonZeroU32;
+
+use crate::delay_line::StereoDelay;
+use crate::timing::{NoteModifier, TimeDiv, Timing};
+use hound::SampleFormat::Int;
+use hound::{Error, SampleFormat, WavReader, WavSpec, WavWriter};
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
+/// The struct used for the main plugin.
+/// # Attributes
+/// * `params`: An Arc containing an instance of `GranularPluginParams`
+/// * `delay`: An instance of `StereoDelay` storing the plugins delay processor
 struct GranularPlugin {
     params: Arc<GranularPluginParams>,
+    delay: StereoDelay,
 }
 
+/// The parameters for the main plugin, returned in an Arc type.
 #[derive(Params)]
 struct GranularPluginParams {
-    /// The parameter's ID is used to identify the parameter in the wrappred plugin API. As long as
-    /// these IDs remain constant, you can rename and reorder these fields as you wish. The
-    /// parameters are exposed to the host in the same order they were defined. In this case, this
-    /// gain parameter is stored as linear gain while the values are displayed in decibels.
-    #[id = "gain"]
+    #[id = "Gain"]
     pub gain: FloatParam,
+
+    #[id = "Sync"]
+    pub sync_time: BoolParam,
+
+    #[id = "Left-Time"]
+    pub left_time_ms: IntParam,
+
+    #[id = "Right-Time"]
+    pub right_time_ms: IntParam,
+
+    #[id = "Left-Time-Division"]
+    pub left_time_div: EnumParam<TimeDiv>,
+
+    #[id = "Right-Time-Division"]
+    pub right_time_div: EnumParam<TimeDiv>,
+
+    #[id = "BPM"]
+    pub bpm: IntParam,
+
+    #[id = "Left-Note-Type"]
+    pub left_note_type: EnumParam<NoteModifier>,
+
+    #[id = "Right-Note-Type"]
+    pub right_note_type: EnumParam<NoteModifier>,
+
+    #[id = "Feedback"]
+    pub feedback: FloatParam,
+
+    #[id = "Mix"]
+    pub mix: FloatParam,
+
+    #[id = "Saturate"]
+    pub saturate: BoolParam,
+
+    #[id = "Filter"]
+    pub filter: BoolParam,
+
+    #[id = "Cutoff"]
+    pub cutoff: FloatParam,
+
+    #[id = "Saturate-Factor"]
+    pub saturate_factor: IntParam,
+
+    #[id = "Saturate-Mix"]
+    pub saturate_mix: FloatParam,
 }
 
 impl Default for GranularPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(GranularPluginParams::default()),
+            delay: StereoDelay::new(44100.0, 0.2, 0.3, 0.4, 0.5),
         }
     }
 }
@@ -50,28 +129,110 @@ impl Default for GranularPluginParams {
             // `.with_step_size(0.1)` function to get internal rounding.
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+
+            sync_time: BoolParam::new("Sync", false),
+
+            left_time_ms: IntParam::new("Left Time", 200, IntRange::Linear { min: 1, max: 10000 })
+                .with_unit(" ms")
+                .with_smoother(SmoothingStyle::Linear(50.0)),
+
+            right_time_ms: IntParam::new(
+                "Right Time",
+                200,
+                IntRange::Linear { min: 1, max: 10000 },
+            )
+            .with_unit(" ms")
+            .with_smoother(SmoothingStyle::Linear(50.0)),
+
+            left_time_div: EnumParam::new("Left Division", TimeDiv::Quarter),
+
+            right_time_div: EnumParam::new("Right Division", TimeDiv::Quarter),
+
+            bpm: IntParam::new("BPM", 100, IntRange::Linear { min: 30, max: 200 }),
+
+            left_note_type: EnumParam::new("Left Note Type", NoteModifier::Regular),
+
+            right_note_type: EnumParam::new("Right Note Type", NoteModifier::Dotted),
+
+            feedback: FloatParam::new("Feedback", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_smoother(SmoothingStyle::Linear(50.0))
+                .with_value_to_string(formatters::v2s_f32_percentage(3))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
+
+            mix: FloatParam::new("Mix", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_smoother(SmoothingStyle::Linear(50.0))
+                .with_value_to_string(formatters::v2s_f32_percentage(3))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
+
+            saturate: BoolParam::new("Saturate", false),
+            filter: BoolParam::new("Filter", false),
+
+            cutoff: FloatParam::new(
+                "Colour",
+                5000.0,
+                FloatRange::Linear {
+                    min: 20.0,
+                    max: 5000.0,
+                },
+            )
+            .with_unit(" Hz")
+            .with_smoother(SmoothingStyle::Logarithmic(50.0)),
+            saturate_factor: IntParam::new("Dirt", 2, IntRange::Linear { min: 1, max: 32 }),
+            saturate_mix: FloatParam::new("Crunch", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 }),
+        }
+    }
+}
+
+impl GranularPlugin {
+    fn update_time(&mut self) {
+        match self.params.sync_time.value() {
+            true => {
+                let new_timing_left = Timing::new(
+                    self.params.left_time_div.value(),
+                    self.params.bpm.value() as i16,
+                    self.params.left_note_type.value(),
+                );
+                let new_timing_right = Timing::new(
+                    self.params.right_time_div.value(),
+                    self.params.bpm.value() as i16,
+                    self.params.right_note_type.value(),
+                );
+                self.delay.set_time_left(new_timing_left.to_seconds());
+                self.delay.set_time_right(new_timing_right.to_seconds());
+            }
+            false => {
+                self.delay
+                    .set_time_left(self.params.left_time_ms.value() as f32 / 1000.0);
+                self.delay
+                    .set_time_right(self.params.right_time_ms.value() as f32 / 1000.0);
+            }
         }
     }
 }
 
 impl Plugin for GranularPlugin {
-    const NAME: &'static str = "Granular Plugin";
+    const NAME: &'static str = "Stereo Delay";
     const VENDOR: &'static str = "Ben Ford";
     const URL: &'static str = env!("CARGO_PKG_HOMEPAGE");
     const EMAIL: &'static str = "17bford@tythy.school";
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    const DEFAULT_INPUT_CHANNELS: u32 = 2;
-    const DEFAULT_OUTPUT_CHANNELS: u32 = 2;
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(2),
+        main_output_channels: NonZeroU32::new(2),
 
-    const DEFAULT_AUX_INPUTS: Option<AuxiliaryIOConfig> = None;
-    const DEFAULT_AUX_OUTPUTS: Option<AuxiliaryIOConfig> = None;
+        aux_input_ports: &[new_nonzero_u32(2)],
+
+        ..AudioIOLayout::const_default()
+    }];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
-    const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
+    const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
+
+    type SysExMessage = ();
 
     // More advanced plugins can use this to run expensive background tasks. See the field's
     // documentation for more information. `()` means that the plugin does not have any background
@@ -82,14 +243,9 @@ impl Plugin for GranularPlugin {
         self.params.clone()
     }
 
-    fn accepts_bus_config(&self, config: &BusConfig) -> bool {
-        // This works with any symmetrical IO layout
-        config.num_input_channels == config.num_output_channels && config.num_input_channels > 0
-    }
-
     fn initialize(
         &mut self,
-        _bus_config: &BusConfig,
+        _audio_io_layout: &AudioIOLayout,
         _buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
@@ -110,15 +266,29 @@ impl Plugin for GranularPlugin {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        for channel_samples in buffer.iter_samples() {
-            // Smoothing is optionally built into the parameters themselves
-            let gain: f32 = self.params.gain.smoothed.next();
+        // Mix and Feedback:
+        self.delay.set_mix(self.params.mix.value());
+        self.delay.set_feedback(self.params.feedback.value());
+        // Saturate and Filter:
+        self.delay.set_filter_cutoff(self.params.cutoff.value());
+        self.delay
+            .set_saturation_factor(self.params.saturate_factor.value() as f32);
+        self.delay
+            .set_saturation_mix(self.params.saturate_mix.value());
 
-            for sample in channel_samples {
-                *sample *= gain;
-            }
+        for mut channel_samples in buffer.iter_samples() {
+            let left = *channel_samples.get_mut(0).unwrap();
+            let right = *channel_samples.get_mut(1).unwrap();
+
+            let (processed_l, processed_r) = self.delay.process(
+                left,
+                right,
+                self.params.filter.value(),
+                self.params.saturate.value(),
+            );
+            *channel_samples.get_mut(0).unwrap() = processed_l * self.params.gain.value();
+            *channel_samples.get_mut(1).unwrap() = processed_r * self.params.gain.value();
         }
-
         ProcessStatus::Normal
     }
 }
@@ -137,28 +307,127 @@ impl ClapPlugin for GranularPlugin {
 impl Vst3Plugin for GranularPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"GranularPluginBF";
 
-    // And don't forget to change these categories, see the docstring on `VST3_CATEGORIES` for more
-    // information
-    const VST3_CATEGORIES: &'static str = "Fx|Dynamics";
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Delay];
 }
 
+/// Function used in integration tests to ensure the code can be accessed from an external module
 pub fn stat() -> i16 {
-    return 200;
+    200
 }
 
-pub fn load_wav(path: &str) -> Result<Vec<i16>, &str> {
-    let mut reader = hound::WavReader::open(path)
+/// loads a wav file from string path and returns a result type possibly containing a vector of integer samples
+/// # Returns
+/// * A result type containing either a vector of i16 samples or a hound error
+/// # Parameters
+/// * `path`: A string containing the relative path to the file to be loaded (must include .wav file extension)
+pub fn load_wav(path: &str) -> Result<Vec<i16>, Error> {
+    let mut reader = WavReader::open(path)
         .expect("Test audio should be in tests directory and have the path specified");
     let mut samples: Vec<i16> = vec![];
 
+    // turbofish used to get samples as i16 type
     for sample in reader.samples::<i16>() {
         match sample {
             Ok(s) => samples.push(s),
-            Err(_) => return Err("Error occurred during file load"),
+            Err(e) => return Err(e),
         };
     }
 
     Ok(samples)
+}
+
+/// loads a wav file from string path and returns a result type possibly containing a vector of float samples
+/// # Returns
+/// * A result type containing either a vector of f32 samples or a hound error
+/// # Parameters
+/// * `path`: A string containing the relative path to the file to be loaded (must include .wav file extension)
+pub fn load_wav_float(path: &str) -> Result<Vec<f32>, Error> {
+    let mut reader = WavReader::open(path)
+        .expect("Test audio should be in tests directory and have the path specified");
+    let mut samples: Vec<f32> = vec![];
+
+    // turbofish used to get samples as i16 type
+    for sample in reader.samples::<f32>() {
+        match sample {
+            Ok(s) => samples.push(s),
+            Err(e) => return Err(e),
+        };
+    }
+
+    Ok(samples)
+}
+
+/// writes to a wav file at string path from integer samples
+/// # Parameters
+/// * `path`: A string containing the relative path to the file to be written to (must include .wav file extension)
+/// * `samples`: A vector of i16 samples which will be written to the file
+/// * `mode`: An enum variant determining whether sample vector is stereo or mono (interleaved or not)
+pub fn write_wav(path: &str, samples: Vec<i16>, mode: PhonicMode) {
+    let channels: u16 = match mode {
+        PhonicMode::Mono => 1,
+        PhonicMode::Stereo => 2,
+    };
+
+    let spec = WavSpec {
+        channels,
+        sample_rate: 44100,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+
+    let mut writer = WavWriter::create(path, spec).expect("could not create writer");
+
+    for sample in samples {
+        writer
+            .write_sample(sample)
+            .expect("error occurred while writing sample");
+    }
+    writer.finalize().expect("issue with finalization")
+}
+
+/// writes to a wav file at string path from float samples
+/// # Parameters
+/// * `path`: A string containing the relative path to the file to be written to (must include .wav file extension)
+/// * `samples`: A vector of f32 samples which will be written to the file
+/// * `mode`: An enum variant determining whether sample vector is stereo or mono (interleaved or not)
+pub fn write_wav_float(path: &str, samples: Vec<f32>, mode: PhonicMode) {
+    let channels: u16 = match mode {
+        PhonicMode::Mono => 1,
+        PhonicMode::Stereo => 2,
+    };
+
+    let spec = WavSpec {
+        channels,
+        sample_rate: 44100,
+        bits_per_sample: 32,
+        sample_format: SampleFormat::Float,
+    };
+
+    let mut writer = WavWriter::create(path, spec).expect("could not create writer");
+
+    for sample in samples {
+        writer
+            .write_sample(sample)
+            .expect("error occurred while writing sample");
+    }
+    writer.finalize().expect("issue with finalization")
+}
+
+/// Create a vector of floats distributed uniformly between a minimum and maximum in N channels. Returns a vector of length `channels`
+pub fn distribute_uniform(channels: i8, min: f32, max: f32) -> Vec<f32> {
+    let float_channels = channels as f32;
+    let delta = max - min;
+    (0..channels)
+        .map(|ch_num| ((ch_num as f32 / float_channels) * (delta)) + min)
+        .collect()
+}
+
+/// Create a vector of floats distributed exponentially between a minimum and maximum in N channels. Returns a vector of length `channels`
+pub fn distribute_exponential(channels: i8, delay_base: f32) -> Vec<f32> {
+    let float_channels = channels as f32;
+    (0..channels)
+        .map(|ch_num| 2.0_f32.powf(ch_num as f32 / float_channels) * delay_base)
+        .collect()
 }
 
 nih_export_vst3!(GranularPlugin);
@@ -166,76 +435,131 @@ nih_export_clap!(GranularPlugin);
 
 #[cfg(test)]
 mod tests {
-    use crate::load_wav;
-    use nih_plug::nih_debug_assert_eq;
-    use nih_plug::prelude::NoteEvent;
+    use crate::delay_line::StereoDelay;
+    use crate::multi_channel::MultiDelayLine;
+    use crate::samples::{IntSamples, PhonicMode, Samples};
+    use crate::timing::{NoteModifier, TimeDiv, Timing};
+    use crate::{load_wav, write_wav};
+    use ndarray::Array1;
+    use test_case::test_case;
 
-    // Reverb
-    // Delay
-    // Mod FX
-    // Granular
-    // Engine and Audio basics
+    // Reverb Algorithm
+    #[test]
+    #[ignore]
+    fn test_multi_channel_delay() {
+        let mut in_samples = load_wav("tests/kalimba.wav").unwrap();
+        in_samples.extend_from_slice(&[0; (44100 * 6)]);
+
+        let mut delay = MultiDelayLine::new(
+            vec![0.03237569, 0.05574729, 0.05872747, 0.08126467],
+            0.8,
+            0.25,
+            4,
+            44100,
+        );
+
+        let mut out_samples = Vec::new();
+        for sample in in_samples.iter_mut() {
+            let sample_vec = Array1::from(vec![*sample as f32; 4]);
+            let out_sample = delay.process_with_feedback(sample_vec, true);
+            let summed: f32 = out_sample.iter().sum();
+            out_samples.push(summed as i16 / 4);
+        }
+
+        write_wav(
+            "tests/kalimba_2_series.wav",
+            out_samples,
+            PhonicMode::Stereo,
+        )
+    }
+    // Delay Algorithm
+    #[test_case(
+        "tests/kalimba_filter_5KHz_delay.wav",
+        Timing::new(TimeDiv::Quarter, 80, NoteModifier::Regular),
+        Timing::new(TimeDiv::Quarter, 80, NoteModifier::Dotted),
+        0.65,
+        0.45;
+        "amen break through delay with feedback filter. Eighth and dotted eighth times. 55% feedback 45% mix"
+    )]
+    #[ignore]
+    /// Test which renders the effects of the delay algorithm to a file based on an input file
+    fn test_delay(
+        filename: &str,
+        timing_left: Timing,
+        timing_right: Timing,
+        feedback: f32,
+        mix: f32,
+    ) {
+        // the delay times are chosen based on time divisions at the tempo of the audio being processed
+        let mut delay = StereoDelay::new_sync(44100.0, timing_left, timing_right, feedback, mix);
+
+        // creating a sample struct with the test audio (amen break)
+        let in_samples =
+            IntSamples::new(load_wav("tests/kalimba.wav").expect("error occurred loading file"));
+
+        // initializing output vectors in stereo
+        let mut out_l: Vec<i16> = Vec::new();
+        let mut out_r: Vec<i16> = Vec::new();
+
+        // process frames of stereo audio and write them to the output for left and right
+        for (left, right) in in_samples.get_frames() {
+            let (l, r) = delay.process(left as f32, right as f32, true, false);
+            out_l.push(l as i16);
+            out_r.push(r as i16);
+        }
+
+        // processing tail time seconds worth of 0s to capture the tail of the delay
+        for _ in 0..(44100 * 3) {
+            let (l, r) = delay.process(0.0, 0.0, true, false);
+            out_l.push(l as i16);
+            out_r.push(r as i16);
+        }
+
+        // initialize new sample vector from stereo inputs. from stereo interleaves the samples into a single vector
+        let out_samples = IntSamples::from_stereo(&out_l, &out_r);
+        write_wav(filename, out_samples.samples(), PhonicMode::Stereo);
+    }
+
+    // Modulation Algorithm
+    // Granular Engine
+    // Audio / MIDI basics
     // *   MIDI tests
     //     MIDI CC
-    const TIMING: u32 = 5;
-
-    #[test]
-    fn midi_cc_conversion_correct() {
-        let event: NoteEvent = NoteEvent::MidiCC {
-            timing: TIMING,
-            channel: 1,
-            cc: 2,
-            value: 0.5,
-        };
-        nih_debug_assert_eq!(
-            NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
-            event
-        )
-    }
-    //     MIDI Note
-
-    #[test]
-    fn midi_note_on_conversion_correct() {
-        let event: NoteEvent = NoteEvent::NoteOn {
-            timing: TIMING,
-            voice_id: None,
-            channel: 1,
-            note: 100,
-            velocity: 127.0,
-        };
-        nih_debug_assert_eq!(
-            NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
-            event
-        )
-    }
-
-    #[test]
-    fn midi_note_off_conversion_correct() {
-        let event: NoteEvent = NoteEvent::NoteOff {
-            timing: TIMING,
-            voice_id: None,
-            channel: 1,
-            note: 100,
-            velocity: 127.0,
-        };
-        nih_debug_assert_eq!(
-            NoteEvent::from_midi(TIMING, event.as_midi().unwrap()).unwrap(),
-            event
-        )
-    }
-    //    MIDI filter
-    //
     // * Audio testing
-    //     Wav file loaded
+    //     Wav file loading
     #[test]
+    #[ignore]
     fn wav_file_loads_correctly() {
         load_wav("tests/amen_br.wav").expect("wav file loaded incorrectly");
     }
 
     #[test]
     #[should_panic]
+    #[ignore]
     fn wav_file_loads_incorrectly() {
         load_wav("doesnt/exist.wav").expect("wav file loaded incorrectly");
     }
-    // GUI
+
+    #[test]
+    #[ignore]
+    // Utility rather than an actual test
+    fn strip_start() {
+        let in_samples = load_wav("tests/sine.wav").unwrap();
+        let mut out: Vec<i16> = Vec::new();
+        let mut found_start = false;
+
+        for sample in in_samples {
+            if !found_start {
+                if sample == 0 {
+                    continue;
+                } else {
+                    found_start = true
+                }
+            } else {
+                out.push(sample);
+            }
+        }
+        let _stereo_samples = IntSamples::from_mono(&out);
+        write_wav("tests/sine.wav", out, PhonicMode::Mono);
+    }
 }
